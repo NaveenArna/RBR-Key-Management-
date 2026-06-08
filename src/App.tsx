@@ -459,6 +459,15 @@ export default function App() {
 
   // Modals
   const [editRow,setEditRow]=useState<(PropertyRow&{_box:string})|null>(null);
+  const [confirmDelete,setConfirmDelete]=useState<{box:string;id:string;address:string}|null>(null);
+  const [showClearData,setShowClearData]=useState(false);
+  const [clearStep,setClearStep]=useState(1); // 1=choose, 2=pin, 3=confirm
+  const [clearTarget,setClearTarget]=useState<string>("all"); // "all"|"history"|box name
+  const [clearConfirmText,setClearConfirmText]=useState("");
+  const [clearPinDigits,setClearPinDigits]=useState<string[]>([]);
+  const [clearPinError,setClearPinError]=useState(false);
+  const [clearPinShake,setClearPinShake]=useState(false);
+  const [addAnotherPrompt,setAddAnotherPrompt]=useState(false); // show "Add another?" after success
   const [showNewBox,setShowNewBox]=useState(false);
   const [newBoxName,setNewBoxName]=useState("");
   const [newBoxMax,setNewBoxMax]=useState<string>("100");
@@ -580,6 +589,8 @@ export default function App() {
     }
     setAddAddress("");setAddLockNo("");setAddExisting(false);
     setAddKeys(Object.fromEntries(KEY_TYPES.map(k=>[k,"0"])));
+    setAddAnotherPrompt(true);
+    setTimeout(()=>setAddAnotherPrompt(false), 6000); // auto-dismiss after 6s
   }
 
   function handleAddBox(){
@@ -608,9 +619,121 @@ export default function App() {
   }
 
   function handleDelete(box:string,id:string){
-    if(!confirm("Delete this entry?")) return;
-    setData(prev=>({...prev,[box]:prev[box].filter(r=>r._id!==id)}));
-    showToast("Entry removed");
+    const row=(data[box]||[]).find(r=>r._id===id);
+    setConfirmDelete({box,id,address:row?.["Property Address"]||"this property"});
+  }
+  function confirmDeleteNow(){
+    if(!confirmDelete) return;
+    setData(prev=>({...prev,[confirmDelete.box]:prev[confirmDelete.box].filter(r=>r._id!==confirmDelete.id)}));
+    // also close edit modal if open for same row
+    if(editRow?._id===confirmDelete.id) setEditRow(null);
+    setConfirmDelete(null);
+    showToast("Property deleted");
+  }
+
+
+  function handleImport(e: React.ChangeEvent<HTMLInputElement>){
+    const file = e.target.files?.[0];
+    if(!file){ return; }
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const wb = XLSX.read(evt.target?.result, {type:"binary"});
+        const imported: Record<string,PropertyRow[]> = {};
+        let totalImported = 0;
+
+        wb.SheetNames.forEach(sheetName => {
+          // Skip history sheet
+          if(sheetName.toLowerCase()==="history") return;
+          const ws = wb.Sheets[sheetName];
+          const rows: any[] = XLSX.utils.sheet_to_json(ws, {defval:0});
+          if(rows.length===0) return;
+
+          imported[sheetName] = rows.map((r:any, i:number) => ({
+            "Lock Box No.": parseInt(r["Lock Box No."]) || i+1,
+            "Property Address": String(r["Property Address"]||"").trim(),
+            "Main Door Key": parseInt(r["Main Door Key"])||0,
+            "Mail Box Key": parseInt(r["Mail Box Key"])||0,
+            "Pen drive": parseInt(r["Pen drive"])||0,
+            "Smart Key": parseInt(r["Smart Key"])||0,
+            "Other Key": parseInt(r["Other Key"])||0,
+            _id: `${sheetName}-import-${i}-${Date.now()}`,
+          })).filter(r => r["Property Address"].length > 0);
+
+          totalImported += imported[sheetName].length;
+        });
+
+        if(Object.keys(imported).length === 0){
+          showToast("No valid sheets found in Excel file","error"); return;
+        }
+
+        // Merge with existing or replace per box
+        setData(prev => {
+          const next = {...prev};
+          for(const [box, rows] of Object.entries(imported)){
+            next[box] = rows;
+            // ensure box settings exist
+            setBoxSettings(bs => bs[box] ? bs : {...bs, [box]:{maxProps:DEFAULT_MAX}});
+          }
+          return next;
+        });
+        // also update box settings for any new boxes
+        setBoxSettings(prev => {
+          const next = {...prev};
+          for(const box of Object.keys(imported)){
+            if(!next[box]) next[box] = {maxProps:DEFAULT_MAX};
+          }
+          return next;
+        });
+
+        addLog("add","(Excel Import)","All Boxes","(imported)",totalImported);
+        showToast(`✓ Imported ${totalImported} properties from ${Object.keys(imported).length} box(es)`);
+        setActiveTab("inventory");
+        setActiveBox(Object.keys(imported)[0]);
+      } catch(err){
+        showToast("Failed to read Excel file — check format","error");
+      }
+    };
+    reader.readAsBinaryString(file);
+    // reset input so same file can be re-imported
+    e.target.value = "";
+  }
+
+  const importRef = useRef<HTMLInputElement>(null);
+
+  function handleClearData(){
+    if(clearTarget==="all"){
+      const empty: Record<string,PropertyRow[]>={};
+      for(const box of Object.keys(data)) empty[box]=[];
+      setData(empty); setTxLog([]);
+      showToast("✓ All data cleared");
+    } else if(clearTarget==="history"){
+      setTxLog([]);
+      showToast("✓ Transaction history cleared");
+    } else {
+      // individual box name
+      setData(prev=>({...prev,[clearTarget]:[]}));
+      showToast(`✓ ${clearTarget} cleared`);
+    }
+    setShowClearData(false); setClearConfirmText("");
+    setClearStep(1); setClearPinDigits([]); setClearPinError(false);
+    navigateTo("inventory");
+  }
+
+  function handleClearPinDigit(d:string){
+    if(clearPinDigits.length>=4) return;
+    const next=[...clearPinDigits,d];
+    setClearPinDigits(next);
+    if(next.length===4){
+      setTimeout(()=>{
+        if(next.join("")===getStoredPasscode()){
+          setClearPinDigits([]); setClearPinError(false); setClearStep(3);
+        } else {
+          setClearPinShake(true);
+          setTimeout(()=>{setClearPinShake(false);setClearPinDigits([]);setClearPinError(true);},500);
+        }
+      },120);
+    }
   }
 
   function exportXLSX(){
@@ -715,9 +838,14 @@ export default function App() {
           </div>
         </div>
         <div style={{display:"flex",gap:8,flexShrink:0}}>
+          {/* Hidden file input for Excel import */}
+          <input ref={importRef} type="file" accept=".xlsx,.xls" style={{display:"none"}}
+            onChange={handleImport}/>
+          <button className="btn btn-outline" onClick={()=>importRef.current?.click()} style={{fontSize:11,padding:"7px 10px",color:"#50c880",borderColor:"#207020"}} title="Import Excel file">⬆ Import</button>
           <button className="btn btn-outline" onClick={()=>setShowNewBox(true)} style={{fontSize:11,padding:"7px 10px"}}>➕ Box</button>
           <button className="btn btn-outline" onClick={()=>setShowChangePin(true)} style={{fontSize:11,padding:"7px 10px"}} title="Change PIN">🔒 PIN</button>
           <button className="btn btn-amber" onClick={exportXLSX} style={{fontSize:11,padding:"7px 10px"}}>⬇ Export</button>
+          <button onClick={()=>{setShowClearData(true);setClearStep(1);setClearConfirmText("");}} style={{background:"transparent",border:"1px solid #5a2020",color:"#c05050",borderRadius:4,padding:"7px 10px",fontSize:11,cursor:"pointer",fontFamily:'"Courier New",monospace',fontWeight:"bold"}} title="Clear Data">🗑</button>
         </div>
       </div>
 
@@ -844,7 +972,7 @@ export default function App() {
                             <td style={{textAlign:"center"}}><span className={`badge ${tot>0?"badge-a":"badge-z"}`}>{tot}</span></td>
                             <td><div style={{display:"flex",gap:6}}>
                               <button className="btn btn-edit" onClick={()=>setEditRow({...row,_box:activeBox})}>Edit</button>
-                              <button className="btn btn-danger" onClick={()=>handleDelete(activeBox,row._id)}>Del</button>
+                              <button className="btn btn-danger" onClick={()=>handleDelete(activeBox,row._id)}>🗑</button>
                             </div></td>
                           </tr>
                         );
@@ -946,6 +1074,38 @@ export default function App() {
                         :<>Capacity: {boxStats[addBox].props}/{boxStats[addBox].maxProps} properties ({boxStats[addBox].pct}% full)</>}
                     </div>
                   )}
+                  {/* Key totals for selected box */}
+                  {(boxStats[addBox]?.pct??0)<100&&(()=>{
+                    const boxRows=data[addBox]||[];
+                    const totals=Object.fromEntries(KEY_TYPES.map(k=>[k,boxRows.reduce((s:number,r:PropertyRow)=>s+(r[k as keyof PropertyRow] as number||0),0)]));
+                    const grandTotal=KEY_TYPES.reduce((s:number,k:string)=>s+(totals[k]||0),0);
+                    return (
+                      <div style={{marginTop:8,background:"#0a0a08",border:"1px solid #2a2010",borderRadius:6,padding:"10px 14px"}}>
+                        <div style={{fontSize:10,color:"#806040",letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>
+                          {addBox} &mdash; Keys Currently in Box
+                        </div>
+                        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
+                          {KEY_TYPES.map(k=>(
+                            <div key={k} style={{
+                              display:"flex",alignItems:"center",gap:4,
+                              fontSize:12,borderRadius:6,padding:"4px 10px",
+                              color:(totals[k]||0)>0?"#c8960c":"#404040",
+                              background:(totals[k]||0)>0?"rgba(200,150,12,.08)":"rgba(50,50,50,.15)",
+                              border:`1px solid ${(totals[k]||0)>0?"rgba(200,150,12,.25)":"#252525"}`
+                            }}>
+                              <span>{KEY_ICONS[k]}</span>
+                              <span style={{fontSize:10,color:"#806040"}}>{k.replace(" Key","")}</span>
+                              <strong style={{color:(totals[k]||0)>0?"#e8aa0e":"#505050"}}>{totals[k]||0}</strong>
+                            </div>
+                          ))}
+                        </div>
+                        <div style={{fontSize:11,color:"#504030",borderTop:"1px solid #1e1e10",paddingTop:6,display:"flex",justifyContent:"space-between"}}>
+                          <span>Total keys in {addBox}</span>
+                          <strong style={{color:"#c8960c"}}>{grandTotal}</strong>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div>
                   <div className="lbl">Property Address — type to check all boxes</div>
@@ -983,8 +1143,72 @@ export default function App() {
                   );
                 })()}
 
-                <div><div className="lbl">Lock Box No. (auto if blank)</div>
-                  <input type="number" value={addLockNo} onChange={e=>setAddLockNo(e.target.value)} placeholder="Auto" style={{width:"100%"}}/>
+                <div>
+                  <div className="lbl">Lock Box No.</div>
+                  {(()=>{
+                    const usedNos=new Set((data[addBox]||[]).map((r:PropertyRow)=>r["Lock Box No."]));
+                    const maxNo=Math.max(...Array.from(usedNos),0);
+                    const gapNos:number[]=[];
+                    for(let n=1;n<=maxNo;n++){if(!usedNos.has(n))gapNos.push(n);}
+                    const nextNo=maxNo+1;
+                    return (
+                      <div>
+                        <div style={{display:"flex",gap:8,marginBottom:6}}>
+                          <button className="btn" onClick={()=>setAddLockNo(String(nextNo))}
+                            style={{flex:1,padding:"8px 10px",fontSize:11,
+                              background:addLockNo===String(nextNo)?"#c8960c":"transparent",
+                              color:addLockNo===String(nextNo)?"#000":"#c8960c",
+                              border:"1px solid rgba(200,150,12,.4)",borderRadius:4}}>
+                            Next: #{nextNo}
+                          </button>
+                          {gapNos.length>0&&(
+                            <button className="btn" onClick={()=>setAddLockNo(String(gapNos[0]))}
+                              style={{flex:1,padding:"8px 10px",fontSize:11,
+                                background:addLockNo===String(gapNos[0])?"#50c880":"transparent",
+                                color:addLockNo===String(gapNos[0])?"#000":"#50c880",
+                                border:"1px solid rgba(80,200,128,.4)",borderRadius:4}}>
+                              First gap: #{gapNos[0]}
+                            </button>
+                          )}
+                        </div>
+                        {gapNos.length>0&&(
+                          <div style={{marginBottom:6}}>
+                            <div style={{fontSize:10,color:"#806040",letterSpacing:1,marginBottom:4}}>
+                              AVAILABLE GAP NUMBERS ({gapNos.length} free)
+                            </div>
+                            <div style={{display:"flex",flexWrap:"wrap",gap:5,maxHeight:80,overflowY:"auto"}}>
+                              {gapNos.map(n=>(
+                                <div key={n} onClick={()=>setAddLockNo(String(n))}
+                                  style={{
+                                    padding:"3px 10px",borderRadius:4,cursor:"pointer",fontSize:12,fontWeight:"bold",
+                                    background:addLockNo===String(n)?"#50c880":"rgba(80,200,128,.08)",
+                                    color:addLockNo===String(n)?"#000":"#50c880",
+                                    border:`1px solid ${addLockNo===String(n)?"#50c880":"rgba(80,200,128,.3)"}`,
+                                    transition:"all .12s"
+                                  }}>
+                                  #{n}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                          <input type="number" value={addLockNo}
+                            onChange={e=>setAddLockNo(e.target.value)}
+                            onBlur={e=>{const v=parseInt(e.target.value);if(!v||v<1)setAddLockNo(String(nextNo));}}
+                            placeholder={`Auto (next: #${nextNo})`}
+                            inputMode="numeric"
+                            style={{flex:1}}/>
+                          {addLockNo&&usedNos.has(parseInt(addLockNo))&&(
+                            <div style={{fontSize:11,color:"#e06060",whiteSpace:"nowrap"}}>⚠ Already used</div>
+                          )}
+                        </div>
+                        {gapNos.length===0&&(
+                          <div style={{fontSize:10,color:"#504030",marginTop:4}}>No gaps — all numbers 1–{maxNo} are in use</div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div style={{background:"#0a0a08",border:"1px solid #2a2010",borderRadius:6,padding:"14px 16px"}}>
                   <div className="lbl" style={{marginBottom:14}}>{addExisting?"Keys to Add (will be summed)":"Initial Key Counts"}</div>
@@ -1004,6 +1228,26 @@ export default function App() {
                   style={{fontSize:13,padding:"12px",opacity:!addExisting&&(boxStats[addBox]?.pct||0)>=100?0.5:1,cursor:!addExisting&&(boxStats[addBox]?.pct||0)>=100?"not-allowed":"pointer"}}>
                   {addExisting?"➕ Add Keys to Existing Property":`➕ Add Property to ${addBox}`}
                 </button>
+
+                {/* Add Another prompt */}
+                {addAnotherPrompt&&(
+                  <div style={{background:"rgba(80,200,120,.08)",border:"1px solid rgba(80,200,120,.25)",borderRadius:8,padding:"14px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+                    <div>
+                      <div style={{fontSize:13,color:"#50c880",fontWeight:"bold"}}>✓ Property added!</div>
+                      <div style={{fontSize:11,color:"#806040",marginTop:2}}>Want to add another property?</div>
+                    </div>
+                    <div style={{display:"flex",gap:8,flexShrink:0}}>
+                      <button className="btn btn-amber" style={{padding:"8px 14px",fontSize:12}}
+                        onClick={()=>{setAddAnotherPrompt(false);}}>
+                        ➕ Add Another
+                      </button>
+                      <button className="btn btn-outline" style={{padding:"8px 12px",fontSize:12}}
+                        onClick={()=>{setAddAnotherPrompt(false);navigateTo("inventory");}}>
+                        View List
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1153,10 +1397,217 @@ export default function App() {
                 ))}
               </div>
               <div style={{display:"flex",gap:10}}>
-                <button className="btn btn-amber" onClick={handleSaveEdit} style={{flex:1,padding:"11px"}}>Save</button>
+                <button className="btn btn-amber" onClick={handleSaveEdit} style={{flex:1,padding:"11px"}}>💾 Save</button>
                 <button className="btn btn-outline" onClick={()=>setEditRow(null)} style={{flex:1,padding:"11px"}}>Cancel</button>
               </div>
+              <div style={{marginTop:8}}>
+                <button className="btn btn-danger" style={{width:"100%",padding:"11px",fontSize:12}}
+                  onClick={()=>{if(editRow)handleDelete(editRow._box,editRow._id);}}>
+                  🗑 Delete This Property
+                </button>
+              </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Confirm Delete Modal ── */}
+      {confirmDelete&&(
+        <div className="mo" onClick={()=>setConfirmDelete(null)}>
+          <div className="md" style={{width:360,textAlign:"center"}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:36,marginBottom:12}}>🗑</div>
+            <div style={{fontSize:14,color:"#e8e0d0",fontWeight:"bold",marginBottom:8}}>Delete Property?</div>
+            <div style={{fontSize:12,color:"#c05050",background:"rgba(200,80,80,.08)",border:"1px solid rgba(200,80,80,.2)",borderRadius:6,padding:"10px 14px",marginBottom:18,lineHeight:1.5}}>
+              "{confirmDelete.address}"
+              <div style={{fontSize:11,color:"#806040",marginTop:6}}>This cannot be undone.</div>
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <button className="btn btn-outline" onClick={()=>setConfirmDelete(null)} style={{flex:1,padding:"12px",fontSize:13}}>
+                Cancel
+              </button>
+              <button onClick={confirmDeleteNow} style={{flex:1,padding:"12px",fontSize:13,background:"#c05050",color:"#fff",border:"none",borderRadius:4,cursor:"pointer",fontFamily:'"Courier New",monospace',fontWeight:"bold"}}>
+                🗑 Yes, Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Clear Data Modal ── */}
+      {showClearData&&(
+        <div className="mo" onClick={()=>{setShowClearData(false);setClearStep(1);setClearConfirmText("");setClearPinDigits([]);setClearPinError(false);}}>
+          <div className="md" style={{width:400}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:28,textAlign:"center",marginBottom:8}}>⚠️</div>
+            <div style={{fontSize:14,color:"#e06060",fontWeight:"bold",textAlign:"center",marginBottom:4,letterSpacing:1}}>CLEAR DATA</div>
+
+            {/* Step indicator */}
+            <div style={{display:"flex",justifyContent:"center",gap:6,marginBottom:18}}>
+              {[1,2,3].map(s=>(
+                <div key={s} style={{width:28,height:4,borderRadius:2,background:clearStep>=s?"#c05050":"#2a2010",transition:"background .2s"}}/>
+              ))}
+            </div>
+
+            {/* ── STEP 1: Choose target ── */}
+            {clearStep===1&&(
+              <>
+                <div className="lbl" style={{marginBottom:10}}>Select what to delete</div>
+
+                {/* Individual boxes */}
+                {boxes.map(box=>(
+                  <div key={box} onClick={()=>setClearTarget(box)} style={{
+                    padding:"11px 14px",borderRadius:6,cursor:"pointer",marginBottom:6,
+                    border:`1px solid ${clearTarget===box?"#c05050":"#2a2010"}`,
+                    background:clearTarget===box?"rgba(200,80,80,.1)":"transparent",
+                    display:"flex",alignItems:"center",justifyContent:"space-between",
+                    transition:"all .15s"
+                  }}>
+                    <div>
+                      <div style={{fontSize:13,color:clearTarget===box?"#e06060":"#e0d0b0",fontWeight:"bold"}}>
+                        📦 {box}
+                      </div>
+                      <div style={{fontSize:10,color:"#604030",marginTop:2}}>
+                        {(data[box]||[]).length} properties · {(boxStats[box]?.keys||0)} keys
+                      </div>
+                    </div>
+                    <div style={{fontSize:11,color:clearTarget===box?"#e06060":"#504030",
+                      border:`1px solid ${clearTarget===box?"rgba(200,80,80,.4)":"#2a2010"}`,
+                      padding:"2px 8px",borderRadius:4}}>
+                      {clearTarget===box?"✓ Selected":"Select"}
+                    </div>
+                  </div>
+                ))}
+
+                {/* History option */}
+                <div onClick={()=>setClearTarget("history")} style={{
+                  padding:"11px 14px",borderRadius:6,cursor:"pointer",marginBottom:6,
+                  border:`1px solid ${clearTarget==="history"?"#c05050":"#2a2010"}`,
+                  background:clearTarget==="history"?"rgba(200,80,80,.1)":"transparent",
+                  display:"flex",alignItems:"center",justifyContent:"space-between",
+                  transition:"all .15s"
+                }}>
+                  <div>
+                    <div style={{fontSize:13,color:clearTarget==="history"?"#e06060":"#e0d0b0",fontWeight:"bold"}}>📜 History Only</div>
+                    <div style={{fontSize:10,color:"#604030",marginTop:2}}>{txLog.length} transaction records</div>
+                  </div>
+                  <div style={{fontSize:11,color:clearTarget==="history"?"#e06060":"#504030",
+                    border:`1px solid ${clearTarget==="history"?"rgba(200,80,80,.4)":"#2a2010"}`,
+                    padding:"2px 8px",borderRadius:4}}>
+                    {clearTarget==="history"?"✓ Selected":"Select"}
+                  </div>
+                </div>
+
+                {/* All option */}
+                <div onClick={()=>setClearTarget("all")} style={{
+                  padding:"11px 14px",borderRadius:6,cursor:"pointer",marginBottom:18,
+                  border:`1px solid ${clearTarget==="all"?"#c05050":"#3a1010"}`,
+                  background:clearTarget==="all"?"rgba(200,80,80,.15)":"rgba(60,10,10,.2)",
+                  display:"flex",alignItems:"center",justifyContent:"space-between",
+                  transition:"all .15s"
+                }}>
+                  <div>
+                    <div style={{fontSize:13,color:"#e06060",fontWeight:"bold"}}>🗑 Everything — All Boxes + History</div>
+                    <div style={{fontSize:10,color:"#604030",marginTop:2}}>
+                      {Object.values(data).flat().length} properties + {txLog.length} records
+                    </div>
+                  </div>
+                  <div style={{fontSize:11,color:clearTarget==="all"?"#e06060":"#504030",
+                    border:`1px solid ${clearTarget==="all"?"rgba(200,80,80,.4)":"#3a1010"}`,
+                    padding:"2px 8px",borderRadius:4}}>
+                    {clearTarget==="all"?"✓ Selected":"Select"}
+                  </div>
+                </div>
+
+                <div style={{display:"flex",gap:10}}>
+                  <button className="btn btn-outline" onClick={()=>setShowClearData(false)} style={{flex:1,padding:"11px"}}>Cancel</button>
+                  <button onClick={()=>setClearStep(2)} style={{flex:1,padding:"11px",background:"#c05050",color:"#fff",border:"none",borderRadius:4,cursor:"pointer",fontFamily:'"Courier New",monospace',fontWeight:"bold",fontSize:13}}>
+                    Next →
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* ── STEP 2: PIN verification ── */}
+            {clearStep===2&&(
+              <>
+                <div style={{background:"rgba(200,80,80,.08)",border:"1px solid rgba(200,80,80,.2)",borderRadius:6,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#e06060"}}>
+                  Deleting: <strong>{clearTarget==="all"?"ALL DATA":clearTarget==="history"?"Transaction History":clearTarget}</strong>
+                </div>
+                <div style={{fontSize:13,color:"#806040",textAlign:"center",marginBottom:14}}>Enter your PIN to authorize</div>
+
+                {/* PIN dots */}
+                <div className={clearPinShake?"shake":""} style={{display:"flex",justifyContent:"center",gap:14,marginBottom:20}}>
+                  {[0,1,2,3].map(i=>(
+                    <div key={i} style={{width:14,height:14,borderRadius:"50%",
+                      background:i<clearPinDigits.length?(clearPinError?"#e06060":"#c8960c"):"transparent",
+                      border:`2px solid ${i<clearPinDigits.length?(clearPinError?"#e06060":"#c8960c"):"#3a3020"}`,
+                      transition:"all .15s"}}/>
+                  ))}
+                </div>
+                {clearPinError&&<div style={{fontSize:11,color:"#e06060",textAlign:"center",marginBottom:10}}>Incorrect PIN — try again</div>}
+
+                {/* Keypad */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:16}}>
+                  {["1","2","3","4","5","6","7","8","9","","0","⌫"].map((k,i)=>(
+                    k===""?<div key={i}/>:
+                    k==="⌫"?(
+                      <div key={i} className="pin-key" onClick={()=>setClearPinDigits(p=>p.slice(0,-1))}
+                        style={{fontSize:18,color:"#806040",height:56,borderRadius:8}}>⌫</div>
+                    ):(
+                      <div key={i} className="pin-key" onClick={()=>handleClearPinDigit(k)}
+                        style={{fontSize:20,height:56,borderRadius:8}}>{k}</div>
+                    )
+                  ))}
+                </div>
+                <button className="btn btn-outline" onClick={()=>{setClearStep(1);setClearPinDigits([]);setClearPinError(false);}} style={{width:"100%",padding:"10px"}}>← Back</button>
+              </>
+            )}
+
+            {/* ── STEP 3: Final text confirmation ── */}
+            {clearStep===3&&(
+              <>
+                <div style={{background:"rgba(200,80,80,.08)",border:"1px solid rgba(200,80,80,.25)",borderRadius:6,padding:"12px 14px",marginBottom:16}}>
+                  <div style={{fontSize:12,color:"#e06060",fontWeight:"bold",marginBottom:4}}>
+                    ⚠ Final confirmation — deleting:
+                  </div>
+                  <div style={{fontSize:13,color:"#fff",fontWeight:"bold",marginBottom:4}}>
+                    {clearTarget==="all"?"ALL DATA in ALL BOXES + History":
+                     clearTarget==="history"?"Transaction History Only":
+                     `All properties in ${clearTarget}`}
+                  </div>
+                  <div style={{fontSize:11,color:"#806040"}}>
+                    {clearTarget==="all"?`${Object.values(data).flat().length} properties + ${txLog.length} records`:
+                     clearTarget==="history"?`${txLog.length} transaction records`:
+                     `${(data[clearTarget]||[]).length} properties`}
+                    {" "}will be permanently deleted
+                  </div>
+                </div>
+                <div className="lbl" style={{marginBottom:6}}>
+                  Type <strong style={{color:"#e06060",letterSpacing:2}}>DELETE</strong> to confirm
+                </div>
+                <input
+                  value={clearConfirmText}
+                  onChange={e=>setClearConfirmText(e.target.value)}
+                  placeholder='Type DELETE here'
+                  autoFocus
+                  style={{width:"100%",marginBottom:14,
+                    borderColor:clearConfirmText==="DELETE"?"#c05050":undefined,
+                    letterSpacing:clearConfirmText==="DELETE"?3:0}}
+                />
+                <div style={{display:"flex",gap:10}}>
+                  <button className="btn btn-outline" onClick={()=>{setClearStep(2);setClearConfirmText("");}} style={{flex:1,padding:"11px"}}>← Back</button>
+                  <button onClick={handleClearData} disabled={clearConfirmText!=="DELETE"}
+                    style={{flex:1,padding:"11px",
+                      background:clearConfirmText==="DELETE"?"#c05050":"#2a1010",
+                      color:clearConfirmText==="DELETE"?"#fff":"#604040",
+                      border:"none",borderRadius:4,
+                      cursor:clearConfirmText==="DELETE"?"pointer":"not-allowed",
+                      fontFamily:'"Courier New",monospace',fontWeight:"bold",fontSize:13,
+                      transition:"all .2s"}}>
+                    🗑 Delete Now
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
