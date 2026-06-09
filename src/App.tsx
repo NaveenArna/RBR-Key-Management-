@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+ import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
 import { initializeApp } from "firebase/app";
 import {
@@ -563,7 +563,9 @@ export default function App(){
   },[data,activeBox,invSearch]);
   const filteredLog=useMemo(()=>{
     let log=txLog;
-    if(logFilter!=="all") log=log.filter(l=>l.type===logFilter);
+    if(logFilter==="all") { /* no filter */ }
+    else if(logFilter.startsWith("box:")) log=log.filter(l=>l.box===logFilter.slice(4));
+    else log=log.filter(l=>l.type===logFilter);
     if(logSearch.trim()){const q=logSearch.toLowerCase();log=log.filter(l=>l.address.toLowerCase().includes(q)||l.box.toLowerCase().includes(q)||l.keyType.toLowerCase().includes(q));}
     return log;
   },[txLog,logFilter,logSearch]);
@@ -659,8 +661,10 @@ export default function App(){
         showToast(`Error2: ${e2?.code||e2?.message||"unknown"}`, "error");
       }
     }
-    if(deleted) showToast("Property deleted");
-    else showToast("Could not delete - check Firebase Rules", "error");
+    if(deleted){
+      addLog("delete", address, box, "(property deleted)", 0);
+      showToast("Property deleted");
+    } else showToast("Could not delete - check Firebase Rules", "error");
     setSyncing(false);
   }
 
@@ -849,9 +853,13 @@ export default function App(){
           )}
           <button onClick={()=>{setTabHistory([]);setActiveTab("inventory");}} style={{background:activeTab==="inventory"?"rgba(200,150,12,.15)":"transparent",border:"1px solid #3a3020",color:activeTab==="inventory"?"#c8960c":"#806040",borderRadius:6,padding:"6px 10px",cursor:"pointer",fontSize:14,fontFamily:'"Courier New",monospace'}}>🏠</button>
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:6,flex:1,justifyContent:"center"}}>
-          {syncing&&<span className="syncing" style={{fontSize:10,color:"#c8960c"}}>⟳ Syncing</span>}
-          {!syncing&&lastSync&&<span style={{fontSize:9,color:"#404030"}}>✓ {lastSync}</span>}
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",flex:1}}>
+          <div style={{fontSize:13,fontWeight:"bold",color:"#c8960c",letterSpacing:2}}>RBR KEY MANAGEMENT</div>
+          <div style={{fontSize:9,color:"#604020",letterSpacing:2}}>PROPERTY KEY INVENTORY</div>
+          <div style={{fontSize:9,marginTop:2}}>
+            {syncing&&<span className="syncing" style={{color:"#c8960c"}}>⟳ Syncing...</span>}
+            {!syncing&&lastSync&&<span style={{color:"#404030"}}>✓ {lastSync}</span>}
+          </div>
         </div>
         <div style={{display:"flex",gap:6,flexShrink:0}}>
           <input ref={importRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={handleImport}/>
@@ -897,7 +905,7 @@ export default function App(){
         {/* Sidebar */}
         <div style={{width:200,background:"#0c0c0a",borderRight:"1px solid #1e1e10",padding:"14px 0",flexShrink:0}}>
           <div style={{padding:"0 14px 8px",fontSize:10,color:"#504030",letterSpacing:2}}>NAVIGATE</div>
-          {[["inventory","📋","Inventory"],["enter","⬇","Deposit"],["withdraw","⬆","Withdraw"],["add","➕","Add Property"],["history","📜","History"]].map(([id,icon,label])=>(
+          {[["inventory","📋","Inventory"],["enter","⬇","Deposit"],["withdraw","⬆","Withdraw"],["add","➕","Add Property"],["history","📜","History"],["duplicates","⚠","Duplicates"]].map(([id,icon,label])=>(
             <div key={id} className="ni" onClick={()=>{navigateTo(id);if(id==="enter")setTxMode("deposit");if(id==="withdraw")setTxMode("withdraw");}}
               style={{background:activeTab===id?"rgba(200,150,12,.08)":"transparent",borderLeft:activeTab===id?"3px solid #c8960c":"3px solid transparent",color:activeTab===id?"#c8960c":"#706050"}}>
               <span>{icon}</span>{label}
@@ -1101,21 +1109,79 @@ export default function App(){
             </div>
           )}
 
+          {/* DUPLICATES REPORT */}
+          {activeTab==="duplicates"&&(()=>{
+            // Find all addresses that appear more than once across all boxes
+            const addressMap: Record<string,{box:string;lockNo:number;keys:number}[]>={};
+            for(const [box,rows] of Object.entries(data)){
+              for(const r of rows){
+                const addr=r["Property Address"].toLowerCase().trim();
+                if(!addressMap[addr]) addressMap[addr]=[];
+                addressMap[addr].push({box,lockNo:r["Lock Box No."],keys:totalKeys(r)});
+              }
+            }
+            const dupes=Object.entries(addressMap).filter(([,v])=>v.length>1);
+            return (
+              <div>
+                <div className="sec">Duplicate Properties — {dupes.length} found</div>
+                {dupes.length===0?(
+                  <div style={{background:"#0c0c0a",border:"1px solid #1e1e10",borderRadius:8,padding:"50px 20px",textAlign:"center"}}>
+                    <div style={{fontSize:30,marginBottom:10}}>✅</div>
+                    <div style={{fontSize:13,color:"#50c880"}}>No duplicate properties found!</div>
+                    <div style={{fontSize:11,color:"#504030",marginTop:6}}>All property addresses are unique across all boxes</div>
+                  </div>
+                ):(
+                  <div>
+                    <div style={{background:"rgba(200,80,80,.08)",border:"1px solid rgba(200,80,80,.2)",borderRadius:6,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#e06060"}}>
+                      ⚠ {dupes.length} address{dupes.length>1?"es appear":"s appear"} in multiple boxes — review and remove duplicates
+                    </div>
+                    {dupes.map(([addr,entries])=>(
+                      <div key={addr} style={{background:"#0c0c0a",border:"1px solid rgba(200,80,80,.25)",borderRadius:8,padding:"14px",marginBottom:10}}>
+                        <div style={{fontSize:13,color:"#e0d0b0",fontWeight:"bold",marginBottom:10}}>
+                          📍 {entries[0] ? Object.entries(data).flatMap(([,rows])=>rows).find(r=>r["Property Address"].toLowerCase().trim()===addr)?.["Property Address"] || addr : addr}
+                        </div>
+                        <div style={{display:"flex",flexDirection:"column" as const,gap:6}}>
+                          {entries.map((e,i)=>(
+                            <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"rgba(200,80,80,.06)",borderRadius:4,padding:"8px 12px",border:"1px solid rgba(200,80,80,.15)"}}>
+                              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                                <span style={{fontSize:16}}>📦</span>
+                                <div>
+                                  <div style={{fontSize:12,color:"#c8960c",fontWeight:"bold"}}>{e.box}</div>
+                                  <div style={{fontSize:11,color:"#606040"}}>Lock Box #{e.lockNo} · {e.keys} keys</div>
+                                </div>
+                              </div>
+                              <span className="badge badge-r">Duplicate</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           {/* HISTORY */}
           {activeTab==="history"&&(
             <div>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:10}}>
                 <div className="sec" style={{margin:0}}>History - {filteredLog.length} records</div>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                  <input placeholder="Search..." value={logSearch} onChange={e=>setLogSearch(e.target.value)} style={{width:200}}/>
+                  <input placeholder="Search address, box..." value={logSearch} onChange={e=>setLogSearch(e.target.value)} style={{width:200}}/>
                   <select value={logFilter} onChange={e=>setLogFilter(e.target.value)} style={{padding:"8px 10px"}}>
-                    <option value="all">All</option><option value="deposit">Deposit</option><option value="withdraw">Withdraw</option><option value="add">New Added</option>
+                    <option value="all">All Types</option>
+                    <option value="deposit">⬇ Deposits</option>
+                    <option value="withdraw">⬆ Withdrawals</option>
+                    <option value="add">➕ New Added</option>
+                    <option value="delete">🗑 Deleted</option>
+                    {boxes.map(b=><option key={b} value={`box:${b}`}>📦 {b}</option>)}
                   </select>
                   {txLog.length>0&&<button className="btn btn-outline" onClick={()=>{const wb=XLSX.utils.book_new();const ws=XLSX.utils.json_to_sheet(txLog.map(l=>({Date:l.ts,Type:l.type.toUpperCase(),Address:l.address,"Lock Box":l.box,"Key Type":l.keyType,Qty:l.qty})));XLSX.utils.book_append_sheet(wb,ws,"History");XLSX.writeFile(wb,"RBR-Key_History.xlsx");showToast("Exported!");}}>⬇ Export</button>}
                 </div>
               </div>
               <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}>
-                {[{label:"Total",val:txLog.length,c:"#c8960c"},{label:"Deposits",val:txLog.filter(l=>l.type==="deposit").length,c:"#50c880"},{label:"Withdrawals",val:txLog.filter(l=>l.type==="withdraw").length,c:"#e07070"},{label:"New",val:txLog.filter(l=>l.type==="add").length,c:"#7090d0"}].map(s=>(
+                {[{label:"Total",val:txLog.length,c:"#c8960c"},{label:"Deposits",val:txLog.filter(l=>l.type==="deposit").length,c:"#50c880"},{label:"Withdrawals",val:txLog.filter(l=>l.type==="withdraw").length,c:"#e07070"},{label:"New",val:txLog.filter(l=>l.type==="add").length,c:"#7090d0"},{label:"Deleted",val:txLog.filter(l=>l.type==="delete").length,c:"#e07070"}].map(s=>(
                   <div key={s.label} className="sc" style={{flex:1,minWidth:80}}><div style={{fontSize:18,fontWeight:"bold",color:s.c}}>{s.val}</div><div style={{fontSize:9,color:"#806040",letterSpacing:1,marginTop:2}}>{s.label.toUpperCase()}</div></div>
                 ))}
               </div>
@@ -1132,7 +1198,7 @@ export default function App(){
                         {filteredLog.map(log=>(
                           <tr key={log.id}>
                             <td style={{color:"#806040",fontSize:11,whiteSpace:"nowrap"}}>{log.ts}</td>
-                            <td>{log.type==="deposit"&&<span className="badge badge-dep">⬇ Deposit</span>}{log.type==="withdraw"&&<span className="badge badge-wit">⬆ Withdraw</span>}{log.type==="add"&&<span className="badge badge-add">➕ New</span>}</td>
+                            <td>{log.type==="deposit"&&<span className="badge badge-dep">⬇ Deposit</span>}{log.type==="withdraw"&&<span className="badge badge-wit">⬆ Withdraw</span>}{log.type==="add"&&<span className="badge badge-add">➕ New</span>}{log.type==="delete"&&<span className="badge badge-r">🗑 Deleted</span>}</td>
                             <td style={{color:"#e0d0b0",maxWidth:240}}>{log.address}</td>
                             <td style={{color:"#c8960c",fontSize:12}}>{log.box}</td>
                             <td style={{fontSize:12,color:"#a09070"}}>{KEY_ICONS[log.keyType]||""} {log.keyType}</td>
@@ -1279,3 +1345,5 @@ export default function App(){
     </div>
   );
 }
+
+  
