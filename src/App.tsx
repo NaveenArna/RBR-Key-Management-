@@ -94,7 +94,8 @@ function getBoxStats(data:Record<string,PropertyRow[]>,settings:Record<string,Bo
 // ─────────────────────────────────────────────────────────────────────────────
 function safeId(id:string){return id.replace(/[^a-zA-Z0-9_-]/g,"_");}
 async function fbSaveProperty(box:string, row:PropertyRow){
-  await setDoc(doc(db,"boxes",box,"properties",safeId(row._id)),{
+  // Use _id as doc path (it equals the Firestore doc ID from onSnapshot)
+  await setDoc(doc(db,"boxes",box,"properties",row._id),{
     lockNo: row["Lock Box No."],
     address: row["Property Address"],
     mainDoor: row["Main Door Key"],
@@ -107,7 +108,8 @@ async function fbSaveProperty(box:string, row:PropertyRow){
   });
 }
 async function fbDeleteProperty(box:string, id:string){
-  await deleteDoc(doc(db,"boxes",box,"properties",safeId(id)));
+  // id is now always the actual Firestore document ID
+  await deleteDoc(doc(db,"boxes",box,"properties",id));
 }
 async function fbSaveBoxSettings(box:string, maxProps:number){
   await setDoc(doc(db,"settings",box),{maxProps, updatedAt:serverTimestamp()},{merge:true});
@@ -128,9 +130,9 @@ async function fbClearHistory(){
   await batch.commit();
 }
 
-function fbRowToProperty(d:any): PropertyRow {
-  // Use stored _id (original with spaces) for UI matching
-  // safeId is only used for Firestore document path
+function fbRowToProperty(d:any, docId?:string): PropertyRow {
+  // ALWAYS use the Firestore document ID as _id
+  // This guarantees delete/update always finds the right document
   return {
     "Lock Box No.": d.lockNo||0,
     "Property Address": d.address||"",
@@ -139,7 +141,7 @@ function fbRowToProperty(d:any): PropertyRow {
     "Pen drive": d.penDrive||0,
     "Smart Key": d.smartKey||0,
     "Other Key": d.otherKey||0,
-    _id: d._id||d.id
+    _id: docId||d._id||d.id  // docId = actual Firestore doc ID
   };
 }
 
@@ -466,7 +468,7 @@ export default function App(){
 
       for(const box of loadedBoxes){
         const unsub=onSnapshot(collection(db,"boxes",box,"properties"),(snap)=>{
-          const rows:PropertyRow[]=snap.docs.map(d=>fbRowToProperty(d.data()));
+          const rows:PropertyRow[]=snap.docs.map(d=>fbRowToProperty(d.data(), d.id));
           rows.sort((a,b)=>a["Lock Box No."]-b["Lock Box No."]);
           setData(prev=>({...prev,[box]:rows}));
           setLastSync(nowStr());
@@ -608,6 +610,7 @@ export default function App(){
   async function confirmDeleteNow(){
     if(!confirmDelete) return;
     const {box,id}=confirmDelete;
+    console.log("Deleting:", box, id); // debug
     // optimistic UI update
     setData(prev=>({...prev,[box]:prev[box].filter(r=>r._id!==id)}));
     if(editRow?._id===id) setEditRow(null);
@@ -615,13 +618,15 @@ export default function App(){
     setSyncing(true);
     try{
       await fbDeleteProperty(box,id);
+      console.log("Delete success:", id);
       showToast("Property deleted");
     }catch(err:any){
-      // Revert optimistic update if Firebase fails
+      console.error("Delete error:", err);
       showToast(`Delete failed: ${err?.message||"Check Firebase rules"}`, "error");
-      // re-fetch from Firebase to restore correct state
-      const snap=await import("firebase/firestore").then(({getDocs,collection})=>getDocs(collection(db,"boxes",box,"properties")));
-      const rows=snap.docs.map((d:any)=>fbRowToProperty(d.data()));
+      // re-fetch to restore correct state
+      const {getDocs, collection:col} = await import("firebase/firestore");
+      const snap=await getDocs(col(db,"boxes",box,"properties"));
+      const rows=snap.docs.map((d:any)=>fbRowToProperty(d.data(), d.id));
       rows.sort((a:any,b:any)=>a["Lock Box No."]-b["Lock Box No."]);
       setData(prev=>({...prev,[box]:rows}));
     }
