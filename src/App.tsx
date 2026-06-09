@@ -228,7 +228,6 @@ function LoginScreen({ onLogin }: LoginScreenProps) {
         // Auto-create admin profile for first user if users collection is empty
         const allUsers = await getDocs(collection(db,"users"));
         if(allUsers.empty){
-          // No users exist yet - make this person admin
           const adminUser: AppUser = {
             uid, email: email.trim(), name: email.split("@")[0],
             role:"admin", canAdd:true, canEdit:true, canDelete:true, active:true
@@ -238,21 +237,33 @@ function LoginScreen({ onLogin }: LoginScreenProps) {
           setLoading(false); return;
         }
         await signOut(auth);
-        setError(`No profile found for ${email.trim()} — add this user in Firestore users collection`);
+        setError(`No profile found — ask admin to add you in Firestore users collection`);
         setLoading(false); return;
       }
 
-      const userData = userSnap.docs[0].data() as AppUser;
-
-      // Update UID if it was found by email but UID didn't match
-      if(userData.uid !== uid){
-        await setDoc(doc(db,"users",uid), {...userData, uid}, {merge:true});
-        // Also fix old document if it had wrong id
+      // Normalize field names — handle any capitalization variant
+      function normalizeUser(d: any, fallbackUid: string): AppUser {
+        return {
+          uid: d.uid || d.Uid || fallbackUid,
+          email: d.email || d.Email || "",
+          name: d.name || d.Name || d.email || "",
+          role: (d.role || d.Role || "staff").toLowerCase() as "admin"|"staff",
+          canAdd: d.canAdd ?? d.canadd ?? d.can_add ?? d["Can add"] ?? d["CanAdd"] ?? true,
+          canEdit: d.canEdit ?? d.canedit ?? d.can_edit ?? d["Can edit"] ?? d["CanEdit"] ?? true,
+          canDelete: d.canDelete ?? d.candelete ?? d.can_delete ?? d["Can delete"] ?? d["CanDelete"] ?? false,
+          active: d.active ?? d.Active ?? true,
+        };
       }
+
+      const rawData = userSnap.docs[0].data();
+      const userData = normalizeUser(rawData, uid);
+
+      // Save normalized data back to fix field names for future logins
+      await setDoc(doc(db,"users",uid), userData, {merge:true});
 
       if(!userData.active){
         await signOut(auth);
-        setError("Your account is disabled — contact admin");
+        setError("Your account is disabled — go to Firebase and set active=true");
         setLoading(false); return;
       }
       onLogin({...userData, uid});
@@ -768,7 +779,17 @@ export default function App(){
         // User is signed in - load their profile
         const snap = await getDocs(query(collection(db,"users"), where("uid","==",firebaseUser.uid)));
         if(!snap.empty){
-          const userData = snap.docs[0].data() as AppUser;
+          const raw = snap.docs[0].data();
+          const userData: AppUser = {
+            uid: raw.uid || raw.Uid || firebaseUser.uid,
+            email: raw.email || raw.Email || firebaseUser.email || "",
+            name: raw.name || raw.Name || "",
+            role: (raw.role || raw.Role || "staff").toLowerCase() as "admin"|"staff",
+            canAdd: raw.canAdd ?? raw.canadd ?? raw["Can add"] ?? true,
+            canEdit: raw.canEdit ?? raw.canedit ?? raw["Can edit"] ?? true,
+            canDelete: raw.canDelete ?? raw.candelete ?? raw["Can delete"] ?? false,
+            active: raw.active ?? raw.Active ?? true,
+          };
           if(userData.active){
             setCurrentUser(userData);
           } else {
@@ -1803,4 +1824,3 @@ export default function App(){
   );
 }
 
-  
