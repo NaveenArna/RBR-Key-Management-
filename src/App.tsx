@@ -470,6 +470,13 @@ export default function App(){
           rows.sort((a,b)=>a["Lock Box No."]-b["Lock Box No."]);
           setData(prev=>({...prev,[box]:rows}));
           setLastSync(nowStr());
+          // Clear tx/add address if the property was deleted from this box
+          setTxAddress(prev=>{
+            if(prev && box===txBox && !rows.some(r=>r["Property Address"]===prev)){
+              return ""; // property deleted - clear selection
+            }
+            return prev;
+          });
         });
         unsubs.push(unsub);
         if(!boxSettings[box]) setBoxSettings(prev=>({...prev,[box]:{maxProps:DEFAULT_MAX}}));
@@ -504,6 +511,22 @@ export default function App(){
   const boxes=useMemo(()=>Object.keys(data),[data]);
   const boxStats=useMemo(()=>getBoxStats(data,boxSettings),[data,boxSettings]);
   const entries=useMemo(()=>Object.entries(data).flatMap(([box,rows])=>rows.map(r=>({addr:r["Property Address"],box}))),[data]);
+
+  // When data changes, validate current tx selection - clear if deleted
+  useEffect(()=>{
+    if(!txAddress) return;
+    const existsInAnyBox=entries.some(e=>e.addr===txAddress);
+    if(!existsInAnyBox){
+      setTxAddress("");
+      showToastFn(`Property was deleted - selection cleared`,"error");
+    } else {
+      // If not in selected box, auto-switch to correct box
+      const correctEntry=entries.find(e=>e.addr===txAddress);
+      if(correctEntry && correctEntry.box!==txBox){
+        setTxBox(correctEntry.box);
+      }
+    }
+  },[data, txAddress]);
   const filteredRows=useMemo(()=>{
     const rows=data[activeBox]||[];
     if(!invSearch.trim()) return rows;
@@ -525,7 +548,11 @@ export default function App(){
     if(!txAddress){showToast("Select a property address","error");return;}
     if(qty<=0){showToast("Enter a valid quantity","error");return;}
     const idx=(data[txBox]||[]).findIndex(r=>r["Property Address"]===txAddress);
-    if(idx===-1){showToast(`Address not found in ${txBox}`,"error");return;}
+    if(idx===-1){
+      showToast(`"${txAddress}" not found in ${txBox} - it may have been deleted`,"error");
+      setTxAddress(""); // clear the invalid selection
+      return;
+    }
     const row=data[txBox][idx];
     const current=row[txKeyType as KeyType]||0;
     if(txMode==="withdraw"&&current<qty){showToast(`Only ${current} ${txKeyType}(s) available`,"error");return;}
@@ -1216,5 +1243,3 @@ export default function App(){
     </div>
   );
 }
-
-  
