@@ -81,18 +81,56 @@ function levenshtein(a:string,b:string):number{
   return dp[m][n];
 }
 function similarity(a:string,b:string):number{
-  const al=a.toLowerCase(),bl=b.toLowerCase();
-  if(bl.includes(al)||al.includes(bl)) return 1;
-  const at=al.split(/[\s\-,]+/).filter(Boolean),bt=bl.split(/[\s\-,]+/).filter(Boolean);
-  const hits=at.filter(t=>bt.some(b2=>b2.includes(t)||t.includes(b2)));
-  const tok=at.length>0?hits.length/at.length:0;
-  const ml=Math.max(al.length,bl.length);
-  return tok*0.7+(ml>0?1-levenshtein(al,bl)/ml:1)*0.3;
+  const al=a.toLowerCase().trim();
+  const bl=b.toLowerCase().trim();
+
+  // Exact match
+  if(al===bl) return 1;
+
+  // One fully contains the other (typed partial address)
+  if(bl.includes(al)) return 0.95;
+  if(al.includes(bl)) return 0.9;
+
+  // Split into meaningful tokens — ignore common noise words
+  const noise=new Set(["dr","st","rd","ave","blvd","ln","ct","way","pl","nw","ne","sw","se","n","s","e","w"]);
+  const tokenize=(s:string)=>s.split(/[\s\-,\.]+/).filter(t=>t.length>1&&!noise.has(t));
+  const at=tokenize(al), bt=tokenize(bl);
+
+  if(at.length===0||bt.length===0) return 0;
+
+  // Count how many query tokens appear in the address
+  let matchedTokens=0;
+  let totalMatchScore=0;
+  for(const qt of at){
+    // Exact token match
+    if(bt.includes(qt)){matchedTokens++;totalMatchScore+=1;continue;}
+    // Starts-with match (e.g. "14419" matches "14419")
+    const startMatch=bt.find(t=>t.startsWith(qt)||qt.startsWith(t));
+    if(startMatch){matchedTokens++;totalMatchScore+=0.8;continue;}
+    // Partial token match only if token is long enough (avoid "dr" matching "drive")
+    if(qt.length>=4){
+      const partMatch=bt.find(t=>t.includes(qt)||qt.includes(t));
+      if(partMatch){matchedTokens+=0.5;totalMatchScore+=0.5;}
+    }
+  }
+
+  // Score = weighted ratio of matched tokens to query tokens
+  const tokenScore=totalMatchScore/at.length;
+
+  // Penalize heavily if the first number (house number) doesn't match
+  const aNum=al.match(/^\d+/)?.[0];
+  const bNum=bl.match(/^\d+/)?.[0];
+  if(aNum&&bNum&&aNum!==bNum) return tokenScore*0.3; // different house number = low score
+
+  return tokenScore;
 }
 function fuzzySearch(query:string,entries:AddrEntry[],limit=8):(AddrEntry&{score:number})[]{
-  if(!query.trim()) return [];
-  return entries.map(e=>({...e,score:similarity(query,e.addr)}))
-    .filter(x=>x.score>0.12).sort((a,b)=>b.score-a.score).slice(0,limit);
+  if(!query.trim()||query.length<2) return [];
+  const results=entries.map(e=>({...e,score:similarity(query,e.addr)}))
+    .filter(x=>x.score>0.35) // higher threshold — only meaningful matches
+    .sort((a,b)=>b.score-a.score)
+    .slice(0,limit);
+  return results;
 }
 function getBoxStats(data:Record<string,PropertyRow[]>,settings:Record<string,BoxSettings>):Record<string,BoxStat>{
   const r:Record<string,BoxStat>={};
@@ -1875,4 +1913,3 @@ export default function App(){
     </div>
   );
 }
-
