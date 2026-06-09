@@ -3,7 +3,7 @@ import * as XLSX from "xlsx";
 import { initializeApp } from "firebase/app";
 import {
   getFirestore, doc, collection, getDocs, setDoc, updateDoc,
-  deleteDoc, onSnapshot, writeBatch, serverTimestamp, query, orderBy, limit
+  deleteDoc, onSnapshot, writeBatch, serverTimestamp, query, orderBy, limit, where
 } from "firebase/firestore";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -107,9 +107,22 @@ async function fbSaveProperty(box:string, row:PropertyRow){
     updatedAt: serverTimestamp()
   });
 }
-async function fbDeleteProperty(box:string, id:string){
-  // id is now always the actual Firestore document ID
-  await deleteDoc(doc(db,"boxes",box,"properties",id));
+async function fbDeleteProperty(box:string, id:string, address:string){
+  // Strategy: find by BOTH document id AND by querying address
+  // This handles any ID mismatch from old uploads
+  try {
+    // First try direct delete by id
+    await deleteDoc(doc(db,"boxes",box,"properties",id));
+  } catch(e) {
+    console.warn("Direct delete failed, trying query by address:", e);
+  }
+  // Also query and delete any document with matching address (catches ID mismatches)
+  const q = query(collection(db,"boxes",box,"properties"), where("address","==",address));
+  const snapQ = await getDocs(q);
+  for(const d of snapQ.docs){
+    await deleteDoc(d.ref);
+    console.log("Deleted by address query:", d.id);
+  }
 }
 async function fbSaveBoxSettings(box:string, maxProps:number){
   await setDoc(doc(db,"settings",box),{maxProps, updatedAt:serverTimestamp()},{merge:true});
@@ -617,8 +630,8 @@ export default function App(){
     setConfirmDelete(null);
     setSyncing(true);
     try{
-      await fbDeleteProperty(box,id);
-      console.log("Delete success:", id);
+      await fbDeleteProperty(box,id,confirmDelete.address);
+      console.log("Delete success:", id, confirmDelete.address);
       showToast("Property deleted");
     }catch(err:any){
       console.error("Delete error:", err);
@@ -1248,3 +1261,4 @@ export default function App(){
     </div>
   );
 }
+
