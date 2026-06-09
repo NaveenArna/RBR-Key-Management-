@@ -2,6 +2,10 @@
 import * as XLSX from "xlsx";
 import { initializeApp } from "firebase/app";
 import {
+  getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged,
+  updatePassword, EmailAuthProvider, reauthenticateWithCredential
+} from "firebase/auth";
+import {
   getFirestore, doc, collection, getDocs, setDoc, updateDoc,
   deleteDoc, onSnapshot, writeBatch, serverTimestamp, query, orderBy, limit, where
 } from "firebase/firestore";
@@ -20,6 +24,7 @@ const firebaseConfig = {
 
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp);
+const auth = getAuth(firebaseApp);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants & Types
@@ -48,6 +53,16 @@ interface BoxSettings { maxProps: number; }
 interface BoxStat { props: number; keys: number; maxProps: number; pct: number; }
 interface TxLog { id: string; ts: string; type: string; address: string; box: string; keyType: string; qty: number; user?: string; }
 interface AddrEntry { addr: string; box: string; }
+interface AppUser {
+  uid: string;
+  email: string;
+  name: string;
+  role: "admin" | "staff";
+  canDelete: boolean;
+  canEdit: boolean;
+  canAdd: boolean;
+  active: boolean;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -162,6 +177,268 @@ function fbRowToProperty(d:any, docId?:string): PropertyRow {
 // Initial seed data (uploaded once to Firebase)
 // ─────────────────────────────────────────────────────────────────────────────
 const SEED_DATA: Record<string,any[]> = {"BOX_1":[{"Lock Box No.":1,"Property Address":"1628 Aspire St-28262","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-0"},{"Lock Box No.":2,"Property Address":"2418 Arbor Loop Dr-28217","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-1"},{"Lock Box No.":3,"Property Address":"2837 Ensemble Court","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-2"},{"Lock Box No.":4,"Property Address":"113 Crossvine Dr","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-3"},{"Lock Box No.":5,"Property Address":"2783 Berkhamstead Circle","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-4"},{"Lock Box No.":6,"Property Address":"9128 Lowfalls Lane","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-5"},{"Lock Box No.":7,"Property Address":"7812 Nelson Rd","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-6"},{"Lock Box No.":8,"Property Address":"772 Earhart St NW","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-7"},{"Lock Box No.":9,"Property Address":"2877 Yaeger Drive NW","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-8"},{"Lock Box No.":10,"Property Address":"242 Abersham Drive-28115","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-9"},{"Lock Box No.":11,"Property Address":"5150 Hyrule Dr-28262","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-10"},{"Lock Box No.":12,"Property Address":"12519 Bryton ridge Pkwy","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-11"},{"Lock Box No.":13,"Property Address":"12115 Devon Square Court-28262","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-12"},{"Lock Box No.":14,"Property Address":"10159 Chatham Run Lane","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-13"},{"Lock Box No.":15,"Property Address":"11027 Pagebrook Ln-28214","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-14"},{"Lock Box No.":16,"Property Address":"1572 Forkhorn Dr-28110","Main Door Key":0,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-15"},{"Lock Box No.":17,"Property Address":"1227 Southern Sugar Dr-28262","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-16"},{"Lock Box No.":18,"Property Address":"2026 Tears Ln-28217","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-17"},{"Lock Box No.":19,"Property Address":"10310 Glenmere Creek Circle-28262","Main Door Key":0,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-18"},{"Lock Box No.":20,"Property Address":"14024 Singleleaf Lane-28278","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-19"},{"Lock Box No.":21,"Property Address":"14029 Whistling Tear Dr-28262","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-20"},{"Lock Box No.":22,"Property Address":"1671 Spears Drive-28027","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-21"},{"Lock Box No.":23,"Property Address":"11255 Bryton Parkway-28078","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-22"},{"Lock Box No.":24,"Property Address":"10212 University Park Ln","Main Door Key":2,"Mail Box Key":2,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-23"},{"Lock Box No.":25,"Property Address":"2301 Endeavor Rn","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-24"},{"Lock Box No.":26,"Property Address":"1621 Nia Rd","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-25"},{"Lock Box No.":27,"Property Address":"11229 Smokethron Dr","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-26"},{"Lock Box No.":28,"Property Address":"2158 Holden Avenue Southwest-28025 ","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-27"},{"Lock Box No.":29,"Property Address":"1312 Killashee Ct-28213","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-28"},{"Lock Box No.":30,"Property Address":"3667 Ascott Commons Ln","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-29"},{"Lock Box No.":31,"Property Address":"12562 Mcgrath Dr","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-30"},{"Lock Box No.":32,"Property Address":"1706 Spears Dr NW-28027","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-31"},{"Lock Box No.":33,"Property Address":"2765 Yeager Drive NW ","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-32"},{"Lock Box No.":34,"Property Address":"2853 Yeager Drive NW","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-33"},{"Lock Box No.":35,"Property Address":"1729 Braemar Village Dr-Monroe","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-34"},{"Lock Box No.":36,"Property Address":"10154 Chatham Run Ln","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-35"},{"Lock Box No.":37,"Property Address":"2033 old Rivers Rd-28027","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-36"},{"Lock Box No.":38,"Property Address":"7879 Iron Road(Sherrills Road)","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-37"},{"Lock Box No.":39,"Property Address":"14305 Piper Landing Dr","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-38"},{"Lock Box No.":40,"Property Address":"8006 Ramsburg Dr","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-39"},{"Lock Box No.":41,"Property Address":"1059 Grays Mill Road","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-40"},{"Lock Box No.":42,"Property Address":"1520 Tranquility Ave NW","Main Door Key":3,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-41"},{"Lock Box No.":43,"Property Address":"8924 Connoer Hall Ave","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-42"},{"Lock Box No.":44,"Property Address":"1815 Arbor Vista Dr-28262","Main Door Key":3,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-43"},{"Lock Box No.":45,"Property Address":"4133 Lurelin Lane","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-44"},{"Lock Box No.":46,"Property Address":"10431 Bunclody Dr-28213","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-45"},{"Lock Box No.":47,"Property Address":"7714 Nelson Rd","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-46"},{"Lock Box No.":48,"Property Address":"9294 Perseverance Dr-28215","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-47"},{"Lock Box No.":49,"Property Address":"15126 Windy Plains Rd-28213","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-48"},{"Lock Box No.":50,"Property Address":"1399 Cedardale Ln-28037","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-49"},{"Lock Box No.":51,"Property Address":"1474 Olive Hill Ave NW","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-50"},{"Lock Box No.":52,"Property Address":"274 Halton Crossing Dr SW","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-51"},{"Lock Box No.":53,"Property Address":"4120 County DownAvenue-28081","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-52"},{"Lock Box No.":54,"Property Address":"2136 Laurens Dr-28027","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-53"},{"Lock Box No.":55,"Property Address":"2301 Endeavor Run-28269","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-54"},{"Lock Box No.":56,"Property Address":"1765 Evergreen Drive-28208","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-55"},{"Lock Box No.":57,"Property Address":"3683 Backwater St-28027","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-56"},{"Lock Box No.":58,"Property Address":"4460 Sourwood Court","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-57"},{"Lock Box No.":59,"Property Address":"5720 Rivulet Way","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-58"},{"Lock Box No.":60,"Property Address":"5543 Worrell Way-Kannapolis","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-59"},{"Lock Box No.":61,"Property Address":"7828 Nelson Rd","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-60"},{"Lock Box No.":62,"Property Address":"104 Winterberry St-28117","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-61"},{"Lock Box No.":63,"Property Address":"7106 Waterwheel St SW","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-62"},{"Lock Box No.":64,"Property Address":"9646 Munsing Drive","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-63"},{"Lock Box No.":65,"Property Address":"2128 Blue Sky Mdws Dr-28110","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-64"},{"Lock Box No.":66,"Property Address":"1225 Colgher St-28227","Main Door Key":1,"Mail Box Key":2,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-65"},{"Lock Box No.":67,"Property Address":"8377 Breton Way-28075","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-66"},{"Lock Box No.":68,"Property Address":"1422 Newell Towns Ln-28262","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-67"},{"Lock Box No.":69,"Property Address":"12022 Elizabeth Madison Court-28277","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-68"},{"Lock Box No.":70,"Property Address":"8226 Merryvale Ln-28214","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-69"},{"Lock Box No.":71,"Property Address":"9006 Clayton Alley-28027","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-70"},{"Lock Box No.":72,"Property Address":"5142 Elementor View Dr-28269","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-71"},{"Lock Box No.":73,"Property Address":"9621 Cherry Meadow Dr","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-72"},{"Lock Box No.":74,"Property Address":"2019 Sage Park Dr-28217","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-73"},{"Lock Box No.":75,"Property Address":"5847 Strathmore Ct","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-74"},{"Lock Box No.":76,"Property Address":"5430 Kyndall Walk way-28269","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-75"},{"Lock Box No.":77,"Property Address":"2220 Belterra Dr-28216","Main Door Key":3,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-76"},{"Lock Box No.":78,"Property Address":"784 Earhart St NW","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-77"},{"Lock Box No.":79,"Property Address":"6410 mallard View Ln-28269","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-78"},{"Lock Box No.":80,"Property Address":"13034 Garren Vw Ln-28278","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-79"},{"Lock Box No.":81,"Property Address":"2207 Restina Drive-28173","Main Door Key":3,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-80"},{"Lock Box No.":82,"Property Address":"9308 Widden Way NC-28269","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-81"},{"Lock Box No.":83,"Property Address":"9161 Harwen Ln","Main Door Key":3,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-82"},{"Lock Box No.":84,"Property Address":"9215 Harwen Ln","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-83"},{"Lock Box No.":85,"Property Address":"8608 Lavender PI","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-84"},{"Lock Box No.":86,"Property Address":"619 Breckenridge Rd-Kannapolis","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-85"},{"Lock Box No.":87,"Property Address":"4370 Evening Trail-28027","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-86"},{"Lock Box No.":88,"Property Address":"6405 Prosperity Church Road-28269","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-87"},{"Lock Box No.":89,"Property Address":"9225 Delancey Ln SW","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-88"},{"Lock Box No.":90,"Property Address":"790 Earhart St NW","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-89"},{"Lock Box No.":91,"Property Address":"3603 Backwater Street","Main Door Key":3,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-90"},{"Lock Box No.":92,"Property Address":"5243 Brailey Cir-Kannapolis","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-91"},{"Lock Box No.":93,"Property Address":"5601 Stafford Rd","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-92"},{"Lock Box No.":94,"Property Address":"5005 Jamie Sloop Ln","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-93"},{"Lock Box No.":95,"Property Address":"4060 Backwater Street","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-94"},{"Lock Box No.":96,"Property Address":"15117 Windy Plains Road","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-95"},{"Lock Box No.":97,"Property Address":"439 Sweet Shrub Court-28027","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-96"},{"Lock Box No.":98,"Property Address":"5043 Sunnybrae PI-28262","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-97"},{"Lock Box No.":99,"Property Address":"3125 Hutton Gardens-28269","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-98"},{"Lock Box No.":100,"Property Address":"3321 Finch Borough Ct-28269","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-99"},{"Lock Box No.":101,"Property Address":"2715 Yeager Drive NW","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-100"},{"Lock Box No.":102,"Property Address":"4860 Pepper Dr-Harriburg","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-101"},{"Lock Box No.":103,"Property Address":"4053 Lawnview Dr","Main Door Key":3,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-102"},{"Lock Box No.":104,"Property Address":"9008 Clayton Aly-28027","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-103"},{"Lock Box No.":105,"Property Address":"2627 Silverthorn Dr-28273","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-104"},{"Lock Box No.":106,"Property Address":"4015 Meadow Green Dr","Main Door Key":2,"Mail Box Key":2,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-105"},{"Lock Box No.":107,"Property Address":"4051 Zilker park D-28217","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-106"},{"Lock Box No.":108,"Property Address":"5864 Coulee Ln","Main Door Key":3,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-107"},{"Lock Box No.":109,"Property Address":"2011 Pippen Ave","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-108"},{"Lock Box No.":110,"Property Address":"5044 Falstone Dr","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-109"},{"Lock Box No.":111,"Property Address":"3650 Backwater St","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-110"},{"Lock Box No.":112,"Property Address":"5428 Kinbridge Dr","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-111"},{"Lock Box No.":113,"Property Address":"5629 Stafford Road","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-112"},{"Lock Box No.":114,"Property Address":"5017 Sovereignty Ct","Main Door Key":0,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-113"},{"Lock Box No.":115,"Property Address":"5029 Falstone Dr","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-114"},{"Lock Box No.":116,"Property Address":"3670 Backwater St","Main Door Key":6,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-115"},{"Lock Box No.":117,"Property Address":"4087 Long Arrow Dr-28025","Main Door Key":2,"Mail Box Key":2,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-116"},{"Lock Box No.":118,"Property Address":"5596 Stafford Rd","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-117"},{"Lock Box No.":119,"Property Address":"2136 Highland Knoll Drive","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-118"},{"Lock Box No.":120,"Property Address":"7836 Nelson Road-Mint Hill","Main Door Key":3,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-119"},{"Lock Box No.":121,"Property Address":"736 Lock Harven Dr NW","Main Door Key":3,"Mail Box Key":2,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-120"},{"Lock Box No.":122,"Property Address":"6122 Faron Way","Main Door Key":5,"Mail Box Key":2,"Pen drive":0,"Smart Key":0,"Other Key":1,"_id":"BOX_1-121"},{"Lock Box No.":123,"Property Address":"12111 Devon Square Court","Main Door Key":4,"Mail Box Key":2,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-122"},{"Lock Box No.":124,"Property Address":"2183 Falling Acorn  Ln-28027","Main Door Key":3,"Mail Box Key":1,"Pen drive":1,"Smart Key":0,"Other Key":0,"_id":"BOX_1-123"},{"Lock Box No.":125,"Property Address":"5253 Brailey Cir","Main Door Key":1,"Mail Box Key":2,"Pen drive":1,"Smart Key":1,"Other Key":0,"_id":"BOX_1-124"},{"Lock Box No.":126,"Property Address":"6105 Starview Terrace-28216","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-125"},{"Lock Box No.":127,"Property Address":"2504 Abundance Ln-28173","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-126"},{"Lock Box No.":128,"Property Address":"5763 coulee ln","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-127"},{"Lock Box No.":129,"Property Address":"9004 Clayton Aly-Concord-28027","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-128"},{"Lock Box No.":130,"Property Address":"7145 Bentz St-28269","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-129"},{"Lock Box No.":131,"Property Address":"107 Jameson Pk Dr-28116","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-130"},{"Lock Box No.":132,"Property Address":"13131 Hampton Bay Ln-28213","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-131"},{"Lock Box No.":133,"Property Address":"3011 Glenn Hope Wy-28104","Main Door Key":3,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-132"},{"Lock Box No.":134,"Property Address":"7852 Nelson Rd","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-133"},{"Lock Box No.":135,"Property Address":"10732 Alvarado Way28277","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-134"},{"Lock Box No.":136,"Property Address":"8158 Rudalph Road-28216","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-135"},{"Lock Box No.":137,"Property Address":"6519 Revolutionary Trail-28217","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-136"},{"Lock Box No.":138,"Property Address":"2778 Yeager Dr NW-28025","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-137"},{"Lock Box No.":139,"Property Address":"239 Harpers Run Ln-28104","Main Door Key":3,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-138"},{"Lock Box No.":140,"Property Address":"9146 Redmond Trace Rd-28277","Main Door Key":3,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-139"},{"Lock Box No.":141,"Property Address":"10320 Ebbets Rd-28273","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-140"},{"Lock Box No.":142,"Property Address":"1604 Simril Ct-28278","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-141"},{"Lock Box No.":143,"Property Address":"14418 Target Ln-28278","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-142"},{"Lock Box No.":144,"Property Address":"2871 Yeager Dr NW-28027","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-143"},{"Lock Box No.":145,"Property Address":"3309 Linetender Dr-28036","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-144"},{"Lock Box No.":146,"Property Address":"6104 Balham Ct-28215","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-145"},{"Lock Box No.":147,"Property Address":"1508 Blanche St-28262","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-146"},{"Lock Box No.":148,"Property Address":"1272 Scarlet Firethrone Ave NW","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-147"},{"Lock Box No.":149,"Property Address":"18016 Wilbanks Dr-28278","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-148"},{"Lock Box No.":150,"Property Address":"7022 Walnut Branch Ln-28277","Main Door Key":2,"Mail Box Key":2,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-149"},{"Lock Box No.":151,"Property Address":"1706 Blanche St-28262","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-150"},{"Lock Box No.":152,"Property Address":"3725 Burntwood Ct-28227","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-151"},{"Lock Box No.":153,"Property Address":"4225 Stoneygreen Ln-28215","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-152"},{"Lock Box No.":154,"Property Address":"7067 Waterwheel St SW-28025","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-153"},{"Lock Box No.":155,"Property Address":"8113 Murray Br Dr-28216","Main Door Key":3,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-154"},{"Lock Box No.":156,"Property Address":"8403 Bristle Toe","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-155"},{"Lock Box No.":157,"Property Address":"10730 Tuff Ln-28036","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-156"},{"Lock Box No.":158,"Property Address":"13932 Castle Nook Dr","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-157"},{"Lock Box No.":159,"Property Address":"1616 Wilburn Park Lane-28269","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-158"},{"Lock Box No.":160,"Property Address":"3239 Hampton Bay Lane","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-159"},{"Lock Box No.":161,"Property Address":"12511 Bryton Ridge Pkwy-28078","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-160"},{"Lock Box No.":162,"Property Address":"7402 Dover Mill Dr SW-28025","Main Door Key":3,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-161"},{"Lock Box No.":163,"Property Address":"2116 Clapham Ct-28215","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-162"},{"Lock Box No.":164,"Property Address":"3885 Cullen Meadows Dr-28036","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-163"},{"Lock Box No.":165,"Property Address":"9028 Tamarron Drive-28277","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-164"},{"Lock Box No.":166,"Property Address":"6998 Founders Way-28075","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-165"},{"Lock Box No.":167,"Property Address":"4107 Black Ct-28075","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-166"},{"Lock Box No.":168,"Property Address":"11091 River Oaks Dr Nw","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-167"},{"Lock Box No.":169,"Property Address":"3823 Dahalia Drive","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-168"},{"Lock Box No.":170,"Property Address":"586 Brook Haven-Fort Mill","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-169"},{"Lock Box No.":171,"Property Address":"4110 County Down Avenue-28081","Main Door Key":2,"Mail Box Key":2,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-170"},{"Lock Box No.":172,"Property Address":"369 Abington St","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-171"},{"Lock Box No.":173,"Property Address":"11346 Cedar Walk lane","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-172"},{"Lock Box No.":174,"Property Address":"1778 Braemer Village Dr","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-173"},{"Lock Box No.":175,"Property Address":"2306 Rachelwood Dr","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-174"},{"Lock Box No.":176,"Property Address":"3530 Secrest Landing","Main Door Key":2,"Mail Box Key":2,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-175"},{"Lock Box No.":177,"Property Address":"3615 Secrest Landing","Main Door Key":4,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-176"},{"Lock Box No.":178,"Property Address":"2809 Ava Ave","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-177"},{"Lock Box No.":179,"Property Address":"4155 Stream Dale Cir NW","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-178"},{"Lock Box No.":180,"Property Address":"4509 morning Dew","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-179"},{"Lock Box No.":181,"Property Address":"10604 Haddington Drive","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-180"},{"Lock Box No.":182,"Property Address":"3576 Nimbell Rd-28110","Main Door Key":2,"Mail Box Key":2,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-181"},{"Lock Box No.":183,"Property Address":"2808 Twinberry Ln","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":1,"_id":"BOX_1-182"},{"Lock Box No.":184,"Property Address":"13319 Savaine St","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-183"},{"Lock Box No.":185,"Property Address":"2160 Blue Sky Meadows","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-184"},{"Lock Box No.":186,"Property Address":"10640 Simril Ct","Main Door Key":6,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-185"},{"Lock Box No.":187,"Property Address":"4514 Dover Nest Ct","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-186"},{"Lock Box No.":188,"Property Address":"1705 Hawthorne Lane","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-187"},{"Lock Box No.":189,"Property Address":"412 Wild Dove Ct","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_1-188"},{"Lock Box No.":190,"Property Address":"2624 Snap Dragon Dr","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":1,"_id":"BOX_1-189"}],"BOX_2":[{"Lock Box No.":1,"Property Address":"744 Lock Haven Drive NW-28028","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-0"},{"Lock Box No.":2,"Property Address":"7109 Pennyroyal Wy-28216","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-1"},{"Lock Box No.":3,"Property Address":"3240 Stelfox St-28262","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-2"},{"Lock Box No.":4,"Property Address":"4337 Smt Wds Dr-28216","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-3"},{"Lock Box No.":5,"Property Address":"3719 Wave Rock Ct-29707","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-4"},{"Lock Box No.":6,"Property Address":"2241 Cobble Ct-28110","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-5"},{"Lock Box No.":7,"Property Address":"5605 Stafford Rd-28215","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-6"},{"Lock Box No.":8,"Property Address":"7011 Waterwheel St SW","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-7"},{"Lock Box No.":9,"Property Address":"3483 Backwater St-28027","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-8"},{"Lock Box No.":10,"Property Address":"2321 Creekmere Lane-28262","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-9"},{"Lock Box No.":11,"Property Address":"1453 Harleston St-28079","Main Door Key":3,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-10"},{"Lock Box No.":12,"Property Address":"1726 Braemar Village Dr-28110","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-11"},{"Lock Box No.":13,"Property Address":"1728 Aspire St-28262","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-12"},{"Lock Box No.":14,"Property Address":"9008 Catboat St-28078","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-13"},{"Lock Box No.":15,"Property Address":"2751 Bramble Ridge Ct-28215","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-14"},{"Lock Box No.":16,"Property Address":"14032 Penbury Ln-28278","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-15"},{"Lock Box No.":17,"Property Address":"3526 Cramer Crk Dr-28056","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-16"},{"Lock Box No.":18,"Property Address":"9338 Mallard Mills Dr-28262","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-17"},{"Lock Box No.":19,"Property Address":"2833 Statesville Ave-28206","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-18"},{"Lock Box No.":20,"Property Address":"3432 Blf Hill Ln-28215","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-19"},{"Lock Box No.":21,"Property Address":"10988 Flyreel PI-28036","Main Door Key":3,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-20"},{"Lock Box No.":22,"Property Address":"18010 Stark Way-28278","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-21"},{"Lock Box No.":23,"Property Address":"11126 Green Spring Drive-28078","Main Door Key":0,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-22"},{"Lock Box No.":24,"Property Address":"1713 Unison Dr-28262","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-23"},{"Lock Box No.":25,"Property Address":"10142 Black Locust Ln-28075","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-24"},{"Lock Box No.":26,"Property Address":"17113 Sand Bank Rd-28278","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":2,"_id":"BOX_2-25"},{"Lock Box No.":27,"Property Address":"8227 Cousins Ct-29707","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-26"},{"Lock Box No.":28,"Property Address":"19010 Direwolf Cove-28278","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-27"},{"Lock Box No.":29,"Property Address":"2567 Cornelius PI NW-28027","Main Door Key":3,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-28"},{"Lock Box No.":30,"Property Address":"1735 Braemar Village Dr","Main Door Key":3,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-29"},{"Lock Box No.":31,"Property Address":"2418 Arbor Loop Dr","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-30"},{"Lock Box No.":32,"Property Address":"4004 Petersburg Dr-28173","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-31"},{"Lock Box No.":33,"Property Address":"7005 Ludell Ln-28215","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-32"},{"Lock Box No.":34,"Property Address":"8025 Bristle Toe Lane-28277","Main Door Key":3,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-33"},{"Lock Box No.":35,"Property Address":"1572 Forkhorn Dr","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-34"},{"Lock Box No.":36,"Property Address":"5676 Clear Creek Ln-28215","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-35"},{"Lock Box No.":37,"Property Address":"5726 Rivulet Wy","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-36"},{"Lock Box No.":38,"Property Address":"117 Snead Rd-29715","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-37"},{"Lock Box No.":39,"Property Address":"7832 Nelson Road","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-38"},{"Lock Box No.":40,"Property Address":"113 Crossvine Dr-28117","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-39"},{"Lock Box No.":41,"Property Address":"14924 Nicolas Hall Dr","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-40"},{"Lock Box No.":42,"Property Address":"1011 Ketchum Ct","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-41"},{"Lock Box No.":43,"Property Address":"3053 Summerfield Ridge Ln-28105","Main Door Key":3,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-42"},{"Lock Box No.":44,"Property Address":"234 Quinn Rd-Matthews","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-43"},{"Lock Box No.":45,"Property Address":"14054 Singleleaf Ln-28278","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-44"},{"Lock Box No.":46,"Property Address":"12022 Elizabeth Madison Ct","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-45"},{"Lock Box No.":47,"Property Address":"1716 Vanderlyn St-Monroe","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-46"},{"Lock Box No.":48,"Property Address":"10223 Kelso Ct","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":1,"_id":"BOX_2-47"},{"Lock Box No.":49,"Property Address":"9769 Oaklawn Blvd NW-28078","Main Door Key":1,"Mail Box Key":2,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-48"},{"Lock Box No.":50,"Property Address":"2508 Mccurdy Trail-28269","Main Door Key":3,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-49"},{"Lock Box No.":51,"Property Address":"9320 Alice McGinn Dr","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-50"},{"Lock Box No.":52,"Property Address":"409 Wild Dove Ct","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-51"},{"Lock Box No.":53,"Property Address":"3836 Memorial Park Way","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-52"},{"Lock Box No.":54,"Property Address":"239 Harpers Run Ln","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-53"},{"Lock Box No.":55,"Property Address":"416 Wild Dove Ct","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-54"},{"Lock Box No.":56,"Property Address":"11753 Mesquite Rd-28078","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-55"},{"Lock Box No.":57,"Property Address":"11622 Red Rust Lane","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-56"},{"Lock Box No.":58,"Property Address":"2802 Azalea Hills Dr","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-57"},{"Lock Box No.":59,"Property Address":"4126 Salient St-28205","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-58"},{"Lock Box No.":60,"Property Address":"1312 Secrest Commons Dr","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":1,"_id":"BOX_2-59"},{"Lock Box No.":61,"Property Address":"6319 Southgrove St-28277","Main Door Key":3,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-60"},{"Lock Box No.":62,"Property Address":"4217 Lake Rd-28269","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-61"},{"Lock Box No.":63,"Property Address":"17112 Carolina Hickory Dr-28078","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":2,"_id":"BOX_2-62"},{"Lock Box No.":64,"Property Address":"3958 Rothwood Ln-28075","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-63"},{"Lock Box No.":65,"Property Address":"2809 Ava Ave","Main Door Key":7,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-64"},{"Lock Box No.":66,"Property Address":"3220 Lilac Grove Dr-28269","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-65"},{"Lock Box No.":67,"Property Address":"1725 Aspire Street-28262","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-66"},{"Lock Box No.":68,"Property Address":"6258 tea Olive Dr-28075","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-67"},{"Lock Box No.":69,"Property Address":"8226 Merryvale Ln","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-68"},{"Lock Box No.":70,"Property Address":"7106 Waterwheel St SW-28025","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-69"},{"Lock Box No.":71,"Property Address":"2452 Royal York Ave","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-70"},{"Lock Box No.":72,"Property Address":"7848 Nelson Rd","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-71"},{"Lock Box No.":73,"Property Address":"7928 Denmark Road CLT","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-72"},{"Lock Box No.":74,"Property Address":"7816 Nelson Rd","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-73"},{"Lock Box No.":75,"Property Address":"16341 Leading St","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-74"},{"Lock Box No.":76,"Property Address":"3234 Hiram St-28208","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-75"},{"Lock Box No.":77,"Property Address":"240 Harpers Run Ln-Matthews","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-76"},{"Lock Box No.":78,"Property Address":"133 Harpers Run Ln","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-77"},{"Lock Box No.":79,"Property Address":"10613 Bere Island","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-78"},{"Lock Box No.":80,"Property Address":"5504 Kins Bridge Dr,Mint Hill","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-79"},{"Lock Box No.":81,"Property Address":"9615 Weikert Rd-28215","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-80"},{"Lock Box No.":82,"Property Address":"10327 Snowbell Ct-28215","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-81"},{"Lock Box No.":83,"Property Address":"5110 Hyrule Dr-28262","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-82"},{"Lock Box No.":84,"Property Address":"2849 Aubrey St-Monroe","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-83"},{"Lock Box No.":85,"Property Address":"1617 Blanche St-28262","Main Door Key":3,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-84"},{"Lock Box No.":86,"Property Address":"14917 Baldridge Dr-28078","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-85"},{"Lock Box No.":87,"Property Address":"3530 Secrest Landing","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-86"},{"Lock Box No.":88,"Property Address":"5069 Grain Orchard Rd-28079","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-87"},{"Lock Box No.":89,"Property Address":"2881 Yeager Dr NW-concord","Main Door Key":0,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-88"},{"Lock Box No.":90,"Property Address":"4051 Zilker Park Dr","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-89"},{"Lock Box No.":91,"Property Address":"2314 Donnelly Hills Ln-28262","Main Door Key":3,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-90"},{"Lock Box No.":92,"Property Address":"6329 Marquam PI-28215","Main Door Key":3,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-91"},{"Lock Box No.":93,"Property Address":"3236 Stelfox St-28262","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-92"},{"Lock Box No.":94,"Property Address":"3160 Lilac Grove Dr-28269","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-93"},{"Lock Box No.":95,"Property Address":"2026 Tears Ln-28217","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-94"},{"Lock Box No.":96,"Property Address":"4135 Summit Woods Dr-28216","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-95"},{"Lock Box No.":97,"Property Address":"15720 Country House Street","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-96"},{"Lock Box No.":98,"Property Address":"11255 Bryton Park Wy","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-97"},{"Lock Box No.":99,"Property Address":"4117 Summit Woods Dr-28216","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-98"},{"Lock Box No.":100,"Property Address":"1742 Blanche St-28262","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-99"},{"Lock Box No.":101,"Property Address":"5017 Sovereignty Ct-28205","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-100"},{"Lock Box No.":102,"Property Address":"10159 Chatham Run Ln","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-101"},{"Lock Box No.":103,"Property Address":"14040 Lake Home Ln-28278","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-102"},{"Lock Box No.":104,"Property Address":"6607 Wildbrook Dr-28269","Main Door Key":2,"Mail Box Key":2,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-103"},{"Lock Box No.":105,"Property Address":"5912 faron Way-28262","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-104"},{"Lock Box No.":106,"Property Address":"4464 Millennium Ave-28217","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-105"},{"Lock Box No.":107,"Property Address":"3530 Alister Ave SW-28027","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-106"},{"Lock Box No.":108,"Property Address":"14506 Crociani Dr-28277","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-107"},{"Lock Box No.":109,"Property Address":"7651 Fenn Way-29707","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-108"},{"Lock Box No.":110,"Property Address":"5015 Westmead Ln-28262","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-109"},{"Lock Box No.":111,"Property Address":"1361 Rainier Dr-29708","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-110"},{"Lock Box No.":112,"Property Address":"4143 Summit Woods Dr-28216","Main Door Key":2,"Mail Box Key":2,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-111"},{"Lock Box No.":113,"Property Address":"2352 Belterra Dr-28216","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-112"},{"Lock Box No.":114,"Property Address":"5710 Gulch PI-28215","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-113"},{"Lock Box No.":115,"Property Address":"5110 Friendly Baptist Church Rd-28079","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-114"},{"Lock Box No.":116,"Property Address":"4938 Stffordshire Ln-28213","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-115"},{"Lock Box No.":117,"Property Address":"2603 Bridle Brook Way-28270","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-116"},{"Lock Box No.":118,"Property Address":"15144 Jade St-28277","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-117"},{"Lock Box No.":119,"Property Address":"2222 Transatlantic Ave-28215","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-118"},{"Lock Box No.":120,"Property Address":"7322 Copper Beech Trce-28273","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-119"},{"Lock Box No.":121,"Property Address":"1939 Stallings Rd-28104","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-120"},{"Lock Box No.":122,"Property Address":"6635 Wildbrook Dr-28078","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-121"},{"Lock Box No.":123,"Property Address":"7214 Waterwheel St SW-28025","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-122"},{"Lock Box No.":124,"Property Address":"5504 Joshua Cain Rd-28213","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-123"},{"Lock Box No.":125,"Property Address":"2203 Autumn Olive Ln-28104","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-124"},{"Lock Box No.":126,"Property Address":"3419 Secrest Lndg-28110","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-125"},{"Lock Box No.":127,"Property Address":"8113 Murray Br Dr-28216","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-126"},{"Lock Box No.":128,"Property Address":"4118 Salient Street NC-28205","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-127"},{"Lock Box No.":129,"Property Address":"2885 Yeager Dr NW","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-128"},{"Lock Box No.":130,"Property Address":"10617 Bunclody Dr-28213","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-129"},{"Lock Box No.":131,"Property Address":"4037 Stoneygreen Ln-28215","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-130"},{"Lock Box No.":132,"Property Address":"7311 Mitzi Deborah Ln-28269","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-131"},{"Lock Box No.":133,"Property Address":"4124 Salient St-28205","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-132"},{"Lock Box No.":134,"Property Address":"17322 Carolina Hickory Dr","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-133"},{"Lock Box No.":135,"Property Address":"9529 Teamwork St NW","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-134"},{"Lock Box No.":136,"Property Address":"493 Twelve Oaks Ln-29708","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-135"},{"Lock Box No.":137,"Property Address":"3483 Backwater St-28027","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-136"},{"Lock Box No.":138,"Property Address":"5108 Carrick St-28213","Main Door Key":3,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-137"},{"Lock Box No.":139,"Property Address":"19016 Yellow Birch Dr-28278","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-138"},{"Lock Box No.":140,"Property Address":"205 Limerick Rd-28115 unit-D","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-139"},{"Lock Box No.":141,"Property Address":"4698 Selhurst Dr-SC-29707","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-140"},{"Lock Box No.":142,"Property Address":"2034 Highland Park Dr-28269","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-141"},{"Lock Box No.":143,"Property Address":"348 Cranford Dr-28134","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":2,"_id":"BOX_2-142"},{"Lock Box No.":144,"Property Address":"9046 Evercrisp Ln-28215","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-143"},{"Lock Box No.":145,"Property Address":"808 Gable Oak Ln #59-29708","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-144"},{"Lock Box No.":146,"Property Address":"490 Tayberry Ln-29715","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-145"},{"Lock Box No.":147,"Property Address":"4709 Morning Dew Ct-28269","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-146"},{"Lock Box No.":148,"Property Address":"6126 Russo Ct-29720","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-147"},{"Lock Box No.":149,"Property Address":"246 Ferebee PI-28213","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-148"},{"Lock Box No.":150,"Property Address":"11007 Discovery Dr NW-28027","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-149"},{"Lock Box No.":151,"Property Address":"9626 Kenneth Glenn Dr-28213","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-150"},{"Lock Box No.":152,"Property Address":"1618 Swallow Tail Dr-28012","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-151"},{"Lock Box No.":153,"Property Address":"5984 River Meadow Ct-28213","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-152"},{"Lock Box No.":154,"Property Address":"2835 Berkhamstead Cir-28027","Main Door Key":1,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-153"},{"Lock Box No.":155,"Property Address":"17034 Patron Drive -28273","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-154"},{"Lock Box No.":156,"Property Address":"8046 Saluda Dr-28269","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-155"},{"Lock Box No.":157,"Property Address":"727 Dynamo St NW-28027","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-156"},{"Lock Box No.":158,"Property Address":"8147 Paw Club Dr-28214","Main Door Key":1,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-157"},{"Lock Box No.":159,"Property Address":"7433 Sienna Heights PI-28213","Main Door Key":2,"Mail Box Key":1,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-158"},{"Lock Box No.":160,"Property Address":"3629 Edisto PI-Monroe","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-159"},{"Lock Box No.":161,"Property Address":"5803 Camp Ct-28025","Main Door Key":3,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-160"},{"Lock Box No.":162,"Property Address":"16849 Greenlawn Hills Ct-28213","Main Door Key":2,"Mail Box Key":0,"Pen drive":0,"Smart Key":0,"Other Key":0,"_id":"BOX_2-161"}]}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Login Screen
+// ─────────────────────────────────────────────────────────────────────────────
+interface LoginScreenProps { onLogin: (user: AppUser) => void; }
+function LoginScreen({ onLogin }: LoginScreenProps) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [showPass, setShowPass] = useState(false);
+
+  async function handleLogin() {
+    if(!email || !password){ setError("Enter email and password"); return; }
+    setLoading(true); setError("");
+    try {
+      const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+      // Load user profile from Firestore
+      const userDoc = await getDocs(query(collection(db,"users"), where("uid","==",cred.user.uid)));
+      if(userDoc.empty){
+        await signOut(auth);
+        setError("Access denied — contact admin");
+        setLoading(false); return;
+      }
+      const userData = userDoc.docs[0].data() as AppUser;
+      if(!userData.active){
+        await signOut(auth);
+        setError("Your account is disabled — contact admin");
+        setLoading(false); return;
+      }
+      onLogin(userData);
+    } catch(e: any) {
+      const msg = e.code === "auth/user-not-found" || e.code === "auth/wrong-password" || e.code === "auth/invalid-credential"
+        ? "Invalid email or password"
+        : e.code === "auth/too-many-requests"
+        ? "Too many attempts — try later"
+        : e.message || "Login failed";
+      setError(msg);
+    }
+    setLoading(false);
+  }
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"#0a0a08",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:'"Courier New",monospace',padding:24}}>
+      <div style={{width:"100%",maxWidth:380}}>
+        <div style={{textAlign:"center",marginBottom:36}}>
+          <div style={{fontSize:48,marginBottom:12}}>🔐</div>
+          <div style={{fontSize:18,fontWeight:"bold",color:"#c8960c",letterSpacing:3}}>RBR KEY MANAGEMENT</div>
+          <div style={{fontSize:10,color:"#604020",letterSpacing:3,marginTop:4}}>PROPERTY KEY INVENTORY SYSTEM</div>
+        </div>
+
+        <div style={{background:"#141410",border:"1px solid #3a3020",borderRadius:12,padding:24}}>
+          <div style={{fontSize:12,color:"#806040",letterSpacing:2,textTransform:"uppercase" as const,marginBottom:20,textAlign:"center"}}>Sign In</div>
+
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:10,color:"#806040",letterSpacing:1,textTransform:"uppercase" as const,marginBottom:5}}>Email</div>
+            <input value={email} onChange={e=>setEmail(e.target.value)}
+              placeholder="your@email.com" type="email" autoCapitalize="none"
+              onKeyDown={e=>e.key==="Enter"&&handleLogin()}
+              style={{width:"100%",background:"#1c1c1c",border:"1px solid #3a3020",color:"#e8e0d0",fontFamily:'"Courier New",monospace',borderRadius:6,padding:"10px 14px",fontSize:14,outline:"none"}}/>
+          </div>
+
+          <div style={{marginBottom:20}}>
+            <div style={{fontSize:10,color:"#806040",letterSpacing:1,textTransform:"uppercase" as const,marginBottom:5}}>Password</div>
+            <div style={{position:"relative"}}>
+              <input value={password} onChange={e=>setPassword(e.target.value)}
+                placeholder="••••••••" type={showPass?"text":"password"}
+                onKeyDown={e=>e.key==="Enter"&&handleLogin()}
+                style={{width:"100%",background:"#1c1c1c",border:"1px solid #3a3020",color:"#e8e0d0",fontFamily:'"Courier New",monospace',borderRadius:6,padding:"10px 40px 10px 14px",fontSize:14,outline:"none"}}/>
+              <button onClick={()=>setShowPass(p=>!p)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"#806040",fontSize:14}}>
+                {showPass?"🙈":"👁"}
+              </button>
+            </div>
+          </div>
+
+          {error && (
+            <div style={{background:"rgba(200,80,80,.1)",border:"1px solid rgba(200,80,80,.3)",borderRadius:6,padding:"10px 14px",fontSize:12,color:"#e06060",marginBottom:14,textAlign:"center"}}>
+              {error}
+            </div>
+          )}
+
+          <button onClick={handleLogin} disabled={loading} style={{
+            width:"100%",padding:"13px",background:loading?"#3a2010":"#c8960c",color:"#000",
+            border:"none",borderRadius:6,cursor:loading?"not-allowed":"pointer",
+            fontFamily:'"Courier New",monospace',fontWeight:"bold",fontSize:14,letterSpacing:1,
+            transition:"all .2s"
+          }}>
+            {loading ? "Signing in..." : "Sign In →"}
+          </button>
+        </div>
+
+        <div style={{textAlign:"center",marginTop:16,fontSize:11,color:"#3a2010"}}>
+          Contact your admin to get access
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// User Management (Admin only)
+// ─────────────────────────────────────────────────────────────────────────────
+interface UserManagementProps { currentUser: AppUser; onClose: ()=>void; }
+function UserManagement({ currentUser, onClose }: UserManagementProps) {
+  const [users, setUsers] = useState<AppUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newRole, setNewRole] = useState<"admin"|"staff">("staff");
+  const [newCanDelete, setNewCanDelete] = useState(false);
+  const [newCanEdit, setNewCanEdit] = useState(true);
+  const [newCanAdd, setNewCanAdd] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  useEffect(()=>{
+    getDocs(collection(db,"users")).then(snap=>{
+      setUsers(snap.docs.map(d=>d.data() as AppUser));
+      setLoading(false);
+    });
+  },[]);
+
+  async function addUser(){
+    if(!newEmail||!newName||!newPassword){ setMsg("Fill all fields"); return; }
+    setSaving(true); setMsg("");
+    try {
+      // Create Firebase Auth user via REST API (can't create from client without signing in as new user)
+      // Instead, store user profile - admin must create auth account separately
+      // For now we create auth user using Firebase Admin approach via fetch
+      const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=AIzaSyCLwHkEWbqwlW_P01Q2j3Ply6p1QV-_sT4`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({email:newEmail,password:newPassword,returnSecureToken:true})
+      });
+      const data = await res.json();
+      if(data.error){ setMsg(data.error.message); setSaving(false); return; }
+      const newUser: AppUser = {
+        uid: data.localId, email: newEmail, name: newName,
+        role: newRole, canDelete: newCanDelete, canEdit: newCanEdit, canAdd: newCanAdd, active: true
+      };
+      await setDoc(doc(db,"users",data.localId), newUser);
+      setUsers(prev=>[...prev,newUser]);
+      setMsg(`✓ User ${newName} created`);
+      setShowAdd(false); setNewEmail(""); setNewName(""); setNewPassword("");
+    } catch(e:any){ setMsg(e.message||"Error"); }
+    setSaving(false);
+  }
+
+  async function toggleActive(user: AppUser){
+    const updated = {...user, active: !user.active};
+    await setDoc(doc(db,"users",user.uid), updated);
+    setUsers(prev=>prev.map(u=>u.uid===user.uid?updated:u));
+  }
+
+  async function updatePermissions(user: AppUser, field: keyof AppUser, value: any){
+    const updated = {...user,[field]:value};
+    await setDoc(doc(db,"users",user.uid), updated);
+    setUsers(prev=>prev.map(u=>u.uid===user.uid?updated:u));
+  }
+
+  const inputStyle = {
+    background:"#1c1c1c",border:"1px solid #3a3020",color:"#e8e0d0",
+    fontFamily:'"Courier New",monospace',borderRadius:4,padding:"8px 12px",
+    fontSize:13,outline:"none",width:"100%"
+  };
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style={{background:"#141410",border:"1px solid #3a3020",borderRadius:12,width:"100%",maxWidth:600,maxHeight:"90vh",overflowY:"auto",padding:24}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+          <div style={{fontSize:14,color:"#c8960c",fontWeight:"bold",letterSpacing:1}}>👥 USER MANAGEMENT</div>
+          <button onClick={onClose} style={{background:"transparent",border:"none",color:"#806040",fontSize:18,cursor:"pointer"}}>✕</button>
+        </div>
+
+        {msg&&<div style={{padding:"8px 12px",borderRadius:6,marginBottom:14,fontSize:12,background:msg.startsWith("✓")?"rgba(80,200,80,.1)":"rgba(200,80,80,.1)",color:msg.startsWith("✓")?"#50c880":"#e06060",border:`1px solid ${msg.startsWith("✓")?"rgba(80,200,80,.3)":"rgba(200,80,80,.3)"}`}}>{msg}</div>}
+
+        {/* User list */}
+        {loading ? <div style={{color:"#806040",textAlign:"center",padding:20}}>Loading...</div> : (
+          <div style={{marginBottom:20}}>
+            {users.map(user=>(
+              <div key={user.uid} style={{background:"#0f0f0a",border:`1px solid ${user.active?"#2a2010":"#3a1010"}`,borderRadius:8,padding:"12px 14px",marginBottom:8,opacity:user.active?1:0.6}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                  <div>
+                    <div style={{fontSize:13,color:"#e0d0b0",fontWeight:"bold"}}>{user.name}</div>
+                    <div style={{fontSize:11,color:"#806040",marginTop:2}}>{user.email}</div>
+                    <div style={{fontSize:10,marginTop:2}}>
+                      <span style={{background:user.role==="admin"?"rgba(200,150,12,.2)":"rgba(80,120,200,.2)",color:user.role==="admin"?"#c8960c":"#7090d0",padding:"1px 6px",borderRadius:4}}>{user.role.toUpperCase()}</span>
+                      {user.uid===currentUser.uid&&<span style={{marginLeft:6,color:"#50c880",fontSize:10}}>● You</span>}
+                    </div>
+                  </div>
+                  <button onClick={()=>toggleActive(user)} style={{background:user.active?"rgba(200,80,80,.1)":"rgba(80,200,80,.1)",border:`1px solid ${user.active?"rgba(200,80,80,.3)":"rgba(80,200,80,.3)"}`,color:user.active?"#e06060":"#50c880",borderRadius:4,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:'"Courier New",monospace'}}>
+                    {user.active?"Disable":"Enable"}
+                  </button>
+                </div>
+                {user.uid!==currentUser.uid&&(
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap" as const}}>
+                    {[
+                      {field:"canAdd" as keyof AppUser,label:"➕ Add"},
+                      {field:"canEdit" as keyof AppUser,label:"✏ Edit"},
+                      {field:"canDelete" as keyof AppUser,label:"🗑 Delete"},
+                    ].map(({field,label})=>(
+                      <label key={field} style={{display:"flex",alignItems:"center",gap:4,cursor:"pointer",fontSize:11,color:(user[field] as boolean)?"#c8960c":"#504030"}}>
+                        <input type="checkbox" checked={user[field] as boolean}
+                          onChange={e=>updatePermissions(user,field,e.target.checked)}
+                          style={{width:"auto",accentColor:"#c8960c"}}/>
+                        {label}
+                      </label>
+                    ))}
+                    <select value={user.role} onChange={e=>updatePermissions(user,"role",e.target.value)}
+                      style={{background:"#1c1c1c",border:"1px solid #3a3020",color:"#e8e0d0",borderRadius:4,padding:"2px 6px",fontSize:11}}>
+                      <option value="staff">Staff</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Add User */}
+        {!showAdd?(
+          <button onClick={()=>setShowAdd(true)} style={{width:"100%",padding:"11px",background:"#c8960c",color:"#000",border:"none",borderRadius:6,cursor:"pointer",fontFamily:'"Courier New",monospace',fontWeight:"bold",fontSize:13}}>
+            ➕ Add New User
+          </button>
+        ):(
+          <div style={{background:"#0a0a08",border:"1px solid #2a2010",borderRadius:8,padding:16}}>
+            <div style={{fontSize:12,color:"#c8960c",fontWeight:"bold",marginBottom:14,letterSpacing:1}}>NEW USER</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+              <div><div style={{fontSize:10,color:"#806040",marginBottom:4}}>FULL NAME</div><input value={newName} onChange={e=>setNewName(e.target.value)} placeholder="e.g. John Smith" style={inputStyle}/></div>
+              <div><div style={{fontSize:10,color:"#806040",marginBottom:4}}>ROLE</div>
+                <select value={newRole} onChange={e=>setNewRole(e.target.value as "admin"|"staff")} style={inputStyle}>
+                  <option value="staff">Staff</option><option value="admin">Admin</option>
+                </select>
+              </div>
+            </div>
+            <div style={{marginBottom:10}}><div style={{fontSize:10,color:"#806040",marginBottom:4}}>EMAIL</div><input value={newEmail} onChange={e=>setNewEmail(e.target.value)} placeholder="user@email.com" type="email" style={inputStyle}/></div>
+            <div style={{marginBottom:10}}><div style={{fontSize:10,color:"#806040",marginBottom:4}}>PASSWORD</div><input value={newPassword} onChange={e=>setNewPassword(e.target.value)} placeholder="min 6 characters" type="text" style={inputStyle}/></div>
+            <div style={{display:"flex",gap:12,marginBottom:14}}>
+              {[{field:"canAdd",label:"➕ Can Add"},{field:"canEdit",label:"✏ Can Edit"},{field:"canDelete",label:"🗑 Can Delete"}].map(({field,label})=>(
+                <label key={field} style={{display:"flex",alignItems:"center",gap:4,cursor:"pointer",fontSize:12,color:"#c8960c"}}>
+                  <input type="checkbox"
+                    checked={field==="canAdd"?newCanAdd:field==="canEdit"?newCanEdit:newCanDelete}
+                    onChange={e=>{if(field==="canAdd")setNewCanAdd(e.target.checked);else if(field==="canEdit")setNewCanEdit(e.target.checked);else setNewCanDelete(e.target.checked);}}
+                    style={{accentColor:"#c8960c"}}/>
+                  {label}
+                </label>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={addUser} disabled={saving} style={{flex:1,padding:"11px",background:"#c8960c",color:"#000",border:"none",borderRadius:4,cursor:"pointer",fontFamily:'"Courier New",monospace',fontWeight:"bold",fontSize:13}}>{saving?"Creating...":"Create User"}</button>
+              <button onClick={()=>setShowAdd(false)} style={{flex:1,padding:"11px",background:"transparent",border:"1px solid #3a3020",color:"#a09070",borderRadius:4,cursor:"pointer",fontFamily:'"Courier New",monospace',fontSize:13}}>Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LockScreen component
@@ -361,6 +638,9 @@ function AddressInput({value,onChange,onSelect,onAddNew,allEntries,boxes,boxStat
 // ─────────────────────────────────────────────────────────────────────────────
 export default function App(){
   // ── Auth
+  const [currentUser,setCurrentUser]=useState<AppUser|null>(null);
+  const [authChecked,setAuthChecked]=useState(false); // true once Firebase auth state resolved
+  const [showUserMgmt,setShowUserMgmt]=useState(false);
   const [locked,setLocked]=useState(true);
   const [showChangePin,setShowChangePin]=useState(false);
   const inactivityTimer=useRef<ReturnType<typeof setTimeout>>();
@@ -410,6 +690,32 @@ export default function App(){
   const [toast,setToast]=useState<{msg:string;type:string}|null>(null);
   const toastTimer=useRef<ReturnType<typeof setTimeout>>();
   const importRef=useRef<HTMLInputElement>(null);
+
+  // ── Firebase Auth state listener
+  useEffect(()=>{
+    const unsub = onAuthStateChanged(auth, async (firebaseUser)=>{
+      if(firebaseUser){
+        // User is signed in - load their profile
+        const snap = await getDocs(query(collection(db,"users"), where("uid","==",firebaseUser.uid)));
+        if(!snap.empty){
+          const userData = snap.docs[0].data() as AppUser;
+          if(userData.active){
+            setCurrentUser(userData);
+          } else {
+            await signOut(auth);
+            setCurrentUser(null);
+          }
+        } else {
+          await signOut(auth);
+          setCurrentUser(null);
+        }
+      } else {
+        setCurrentUser(null);
+      }
+      setAuthChecked(true);
+    });
+    return ()=>unsub();
+  },[]);
 
   // ── Auto-lock
   useEffect(()=>{
@@ -529,9 +835,9 @@ export default function App(){
   function goBack(){setTabHistory(prev=>{const h=[...prev];const last=h.pop()||"inventory";setActiveTab(last);return h;});}
 
   function addLog(type:string,address:string,box:string,keyType:string,qty:number){
-    const log:TxLog={id:`log-${Date.now()}`,ts:nowStr(),type,address,box,keyType,qty};
+    const log:TxLog={id:`log-${Date.now()}`,ts:nowStr(),type,address,box,keyType,qty,
+      user: currentUser?.name||currentUser?.email||"Unknown"};
     fbSaveLog(log).catch(()=>{});
-    // optimistic local update
     setTxLog(prev=>[log,...prev]);
   }
 
@@ -574,6 +880,10 @@ export default function App(){
 
   // ── Handlers
   async function handleTransaction(){
+    // Permission check
+    if(txMode==="deposit"||txMode==="withdraw"){
+      if(!currentUser?.canEdit){showToast("No permission to deposit/withdraw","error");return;}
+    }
     const qty=parseInt(String(txQty))||0;
     if(!txAddress){showToast("Select a property address","error");return;}
     if(qty<=0){showToast("Enter a valid quantity","error");return;}
@@ -601,6 +911,7 @@ export default function App(){
   }
 
   async function handleAddNew(){
+    if(!currentUser?.canAdd){showToast("No permission to add properties","error");return;}
     const addr=addAddress.trim();
     if(!addr){showToast("Address is required","error");return;}
     const qty=KEY_TYPES.reduce((s,k)=>s+(parseInt(String(addKeys[k]))||0),0);
@@ -632,6 +943,7 @@ export default function App(){
   }
 
   function handleDelete(box:string,id:string){
+    if(!currentUser?.canDelete){showToast("No permission to delete properties","error");return;}
     const row=(data[box]||[]).find(r=>r._id===id);
     setConfirmDelete({box,id,address:row?.["Property Address"]||"this property"});
   }
@@ -670,6 +982,7 @@ export default function App(){
 
   async function handleSaveEdit(){
     if(!editRow) return;
+    if(!currentUser?.canEdit){showToast("No permission to edit properties","error");return;}
     setData(prev=>({...prev,[editRow._box]:prev[editRow._box].map(r=>r._id===editRow._id?{...editRow}:r)}));
     setSyncing(true);
     try{await fbSaveProperty(editRow._box,editRow);}catch{showToast("Sync error","error");}
@@ -704,6 +1017,7 @@ export default function App(){
   }
 
   async function handleClearData(){
+    if(currentUser?.role!=="admin"){showToast("Admin only action","error");return;}
     setSyncing(true);
     if(clearTarget==="all"){
       const empty:Record<string,PropertyRow[]>={};
@@ -827,6 +1141,15 @@ export default function App(){
   `;
 
   // ── Loading screen
+  // Auth gate
+  if(!authChecked) return (
+    <div style={{background:"#0f0f0f",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:'"Courier New",monospace',color:"#e8e0d0"}}>
+      <div style={{fontSize:40,marginBottom:20}}>🔐</div>
+      <div style={{fontSize:14,color:"#c8960c",letterSpacing:2}}>RBR KEY MANAGEMENT</div>
+      <div style={{fontSize:12,color:"#806040",marginTop:8}}>Checking authentication...</div>
+    </div>
+  );
+  if(!currentUser) return <LoginScreen onLogin={(user)=>{ setCurrentUser(user); setLocked(false); }}/>;
   if(locked) return <LockScreen onUnlock={()=>setLocked(false)}/>;
   if(showChangePin) return <LockScreen mode="change" onUnlock={()=>setShowChangePin(false)} onCancel={()=>setShowChangePin(false)}/>;
 
@@ -856,6 +1179,7 @@ export default function App(){
         <div style={{display:"flex",flexDirection:"column",alignItems:"center",flex:1}}>
           <div style={{fontSize:13,fontWeight:"bold",color:"#c8960c",letterSpacing:2}}>RBR KEY MANAGEMENT</div>
           <div style={{fontSize:9,color:"#604020",letterSpacing:2}}>PROPERTY KEY INVENTORY</div>
+          {currentUser&&<div style={{fontSize:9,marginTop:2,color:"#504030"}}>{currentUser.name} · <span style={{color:currentUser.role==="admin"?"#c8960c":"#7090d0"}}>{currentUser.role.toUpperCase()}</span></div>}
           <div style={{fontSize:9,marginTop:2}}>
             {syncing&&<span className="syncing" style={{color:"#c8960c"}}>⟳ Syncing...</span>}
             {!syncing&&lastSync&&<span style={{color:"#404030"}}>✓ {lastSync}</span>}
@@ -867,7 +1191,9 @@ export default function App(){
           <button className="btn btn-outline" onClick={()=>setShowNewBox(true)} style={{fontSize:10,padding:"6px 8px"}}>➕</button>
           <button className="btn btn-outline" onClick={()=>setShowChangePin(true)} style={{fontSize:10,padding:"6px 8px"}}>🔒</button>
           <button className="btn btn-amber" onClick={exportXLSX} style={{fontSize:10,padding:"6px 8px"}}>⬇</button>
-          <button onClick={()=>{setShowClearData(true);setClearStep(1);setClearConfirmText("");setClearPinDigits([]);setClearPinError(false);}} style={{background:"transparent",border:"1px solid #5a2020",color:"#c05050",borderRadius:4,padding:"6px 8px",fontSize:10,cursor:"pointer",fontFamily:'"Courier New",monospace',fontWeight:"bold"}}>🗑</button>
+          {currentUser?.role==="admin"&&<button onClick={()=>setShowUserMgmt(true)} style={{background:"transparent",border:"1px solid #203050",color:"#5090c0",borderRadius:4,padding:"6px 8px",fontSize:10,cursor:"pointer",fontFamily:'"Courier New",monospace',fontWeight:"bold"}} title="Manage Users">👥</button>}
+          {currentUser?.role==="admin"&&<button onClick={()=>{setShowClearData(true);setClearStep(1);setClearConfirmText("");setClearPinDigits([]);setClearPinError(false);}} style={{background:"transparent",border:"1px solid #5a2020",color:"#c05050",borderRadius:4,padding:"6px 8px",fontSize:10,cursor:"pointer",fontFamily:'"Courier New",monospace',fontWeight:"bold"}}>🗑</button>}
+          <button onClick={()=>signOut(auth).then(()=>setCurrentUser(null))} style={{background:"transparent",border:"1px solid #3a3020",color:"#806040",borderRadius:4,padding:"6px 8px",fontSize:10,cursor:"pointer",fontFamily:'"Courier New",monospace',fontWeight:"bold"}} title="Sign Out">⏻</button>
         </div>
       </div>
 
@@ -905,7 +1231,7 @@ export default function App(){
         {/* Sidebar */}
         <div style={{width:200,background:"#0c0c0a",borderRight:"1px solid #1e1e10",padding:"14px 0",flexShrink:0}}>
           <div style={{padding:"0 14px 8px",fontSize:10,color:"#504030",letterSpacing:2}}>NAVIGATE</div>
-          {[["inventory","📋","Inventory"],["enter","⬇","Deposit"],["withdraw","⬆","Withdraw"],["add","➕","Add Property"],["history","📜","History"],["duplicates","⚠","Duplicates"]].map(([id,icon,label])=>(
+          {[["inventory","📋","Inventory"],["enter","⬇","Deposit"],["withdraw","⬆","Withdraw"],["add","➕","Add Property"],["history","📜","History"],["duplicates","⚠","Duplicates"]].filter(([id])=>id!=="add"||(currentUser?.canAdd??true)).map(([id,icon,label])=>(
             <div key={id} className="ni" onClick={()=>{navigateTo(id);if(id==="enter")setTxMode("deposit");if(id==="withdraw")setTxMode("withdraw");}}
               style={{background:activeTab===id?"rgba(200,150,12,.08)":"transparent",borderLeft:activeTab===id?"3px solid #c8960c":"3px solid transparent",color:activeTab===id?"#c8960c":"#706050"}}>
               <span>{icon}</span>{label}
@@ -975,8 +1301,8 @@ export default function App(){
                             {KEY_TYPES.map(k=>(<td key={k} style={{textAlign:"center"}}>{row[k]>0?<span className={`badge ${row[k]>=3?"badge-h":"badge-a"}`}>{row[k]}</span>:<span className="badge badge-z">-</span>}</td>))}
                             <td style={{textAlign:"center"}}><span className={`badge ${tot>0?"badge-a":"badge-z"}`}>{tot}</span></td>
                             <td><div style={{display:"flex",gap:5}}>
-                              <button className="btn btn-edit" onClick={()=>setEditRow({...row,_box:activeBox})}>Edit</button>
-                              <button className="btn btn-danger" onClick={()=>handleDelete(activeBox,row._id)}>🗑</button>
+                              {currentUser?.canEdit&&<button className="btn btn-edit" onClick={()=>setEditRow({...row,_box:activeBox})}>Edit</button>}
+                              {currentUser?.canDelete&&<button className="btn btn-danger" onClick={()=>handleDelete(activeBox,row._id)}>🗑</button>}
                             </div></td>
                           </tr>
                         );
@@ -1193,7 +1519,7 @@ export default function App(){
                 <div style={{background:"#0c0c0a",border:"1px solid #1e1e10",borderRadius:8,overflow:"hidden"}}>
                   <div style={{overflowX:"auto"}}>
                     <table>
-                      <thead><tr><th>Date & Time</th><th>Type</th><th>Property Address</th><th>Box</th><th>Key Type</th><th>Qty</th></tr></thead>
+                      <thead><tr><th>Date & Time</th><th>Type</th><th>Property Address</th><th>Box</th><th>Key Type</th><th>Qty</th><th>By</th></tr></thead>
                       <tbody>
                         {filteredLog.map(log=>(
                           <tr key={log.id}>
@@ -1340,10 +1666,14 @@ export default function App(){
         </div>
       </div>)}
 
+      {/* User Management */}
+      {showUserMgmt&&currentUser?.role==="admin"&&(
+        <UserManagement currentUser={currentUser} onClose={()=>setShowUserMgmt(false)}/>
+      )}
+
       {/* Toast */}
       {toast&&(<div style={{position:"fixed",bottom:22,right:22,zIndex:2000,background:toast.type==="error"?"#3a0a0a":"#0a1a0a",border:`1px solid ${toast.type==="error"?"#8a2020":"#207020"}`,color:toast.type==="error"?"#ff8080":"#80d080",padding:"11px 20px",borderRadius:8,fontSize:13,fontFamily:'"Courier New",monospace',boxShadow:"0 4px 20px rgba(0,0,0,.5)",animation:"slideIn .2s ease",maxWidth:400}}>{toast.msg}</div>)}
     </div>
   );
 }
 
-  
