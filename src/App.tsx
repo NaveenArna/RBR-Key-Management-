@@ -166,12 +166,12 @@ function LockScreen({onUnlock,mode="unlock",onCancel}:LockScreenProps){
   function evaluate(pin:string){
     if(step==="enter"){
       if(pin===getStoredPasscode()){setSuccess(true);setTimeout(onUnlock,300);}
-      else{setMessage("Incorrect PIN — try again");triggerShake();}
+      else{setMessage("Incorrect PIN - try again");triggerShake();}
     } else if(step==="new1"){
       setNewPin(pin);setDigits([]);setStep("new2");setMessage("Confirm new PIN");
     } else if(step==="new2"){
       if(pin===newPin){savePasscode(pin);setSuccess(true);setMessage("✓ PIN updated!");setTimeout(onUnlock,600);}
-      else{setMessage("PINs don't match — try again");setNewPin("");setStep("new1");triggerShake();}
+      else{setMessage("PINs don't match - try again");setNewPin("");setStep("new1");triggerShake();}
     }
   }
   const keys=[["1","2","3"],["4","5","6"],["7","8","9"],["","0","⌫"]];
@@ -283,7 +283,7 @@ function AddressInput({value,onChange,onSelect,onAddNew,allEntries,boxes,boxStat
                         <span style={{fontSize:20}}>{full?"🔒":"📦"}</span>
                         <div>
                           <div style={{fontSize:13,fontWeight:"bold",color:full?"#e06060":"#e0d0b0"}}>{box}</div>
-                          <div style={{fontSize:10,color:full?"#c05050":"#604030",marginTop:2}}>{full?`FULL — ${st.props}/${st.maxProps}`:`${st.props}/${st.maxProps} props · ${st.pct}%`}</div>
+                          <div style={{fontSize:10,color:full?"#c05050":"#604030",marginTop:2}}>{full?`FULL - ${st.props}/${st.maxProps}`:`${st.props}/${st.maxProps} props · ${st.pct}%`}</div>
                           <div style={{width:110,height:3,background:"#2a2010",borderRadius:2,marginTop:4}}><div style={{width:`${st.pct}%`,height:"100%",background:pc,borderRadius:2}}/></div>
                         </div>
                       </div>
@@ -311,7 +311,7 @@ function AddressInput({value,onChange,onSelect,onAddNew,allEntries,boxes,boxStat
                         <div style={{fontSize:13,color:"#e0d0b0"}}>{hl(s.addr,query)}</div>
                         <div style={{fontSize:10,color:i===0&&Object.keys(grouped)[0]===box?"#c8960c":"#504030",marginTop:2}}>
                           {i===0&&Object.keys(grouped)[0]===box?"⭐ Best match":`Match ${i+1}`}
-                          {s.box!==activeBox&&<span style={{color:"#806040",marginLeft:6}}>— in {s.box}</span>}
+                          {s.box!==activeBox&&<span style={{color:"#806040",marginLeft:6}}>- in {s.box}</span>}
                         </div>
                       </div>
                       <div style={{fontSize:11,color:"#c8960c",border:"1px solid rgba(200,150,12,.3)",padding:"3px 10px",borderRadius:4,whiteSpace:"nowrap",marginLeft:12,flexShrink:0}}>Use →</div>
@@ -325,7 +325,7 @@ function AddressInput({value,onChange,onSelect,onAddNew,allEntries,boxes,boxStat
                   onMouseLeave={e=>(e.currentTarget as HTMLElement).style.background="rgba(200,150,12,.03)"}>
                   <div>
                     <div style={{fontSize:13,color:"#d0a040"}}>➕ Add "{query}" as new property</div>
-                    <div style={{fontSize:10,color:"#605040",marginTop:2}}>Not found — tap to choose a box</div>
+                    <div style={{fontSize:10,color:"#605040",marginTop:2}}>Not found - tap to choose a box</div>
                   </div>
                   <div style={{fontSize:11,color:"#50c880",border:"1px solid rgba(80,200,128,.35)",padding:"3px 10px",borderRadius:4,whiteSpace:"nowrap",marginLeft:12,flexShrink:0}}>Add New →</div>
                 </div>
@@ -437,7 +437,7 @@ export default function App(){
     (async()=>{
       const boxSnap=await getDocs(collection(db,"boxes"));
       if(boxSnap.empty){
-        // First time — upload seed data
+        // First time - upload seed data
         setSyncing(true);
         showToastFn("Uploading initial data to Firebase...","success");
         const batch=writeBatch(db);
@@ -533,10 +533,10 @@ export default function App(){
     setData(prev=>({...prev,[txBox]:updatedRows}));
     // sync to Firebase
     setSyncing(true);
-    try{await fbSaveProperty(txBox,updated);}catch{showToast("Sync error — check connection","error");}
+    try{await fbSaveProperty(txBox,updated);}catch{showToast("Sync error - check connection","error");}
     setSyncing(false);
     addLog(txMode,txAddress,txBox,txKeyType,qty);
-    showToast(`${txMode==="withdraw"?"⬆ Withdrawn":"⬇ Deposited"} ${qty}× ${txKeyType} — ${txBox}`);
+    showToast(`${txMode==="withdraw"?"⬆ Withdrawn":"⬇ Deposited"} ${qty}× ${txKeyType} - ${txBox}`);
     setTxQty("1");
   }
 
@@ -680,7 +680,7 @@ export default function App(){
           totalImported+=imported.length;
         }
         setSyncing(false);
-        showToast(`✓ Imported ${totalImported} properties — synced to Firebase`);
+        showToast(`✓ Imported ${totalImported} properties - synced to Firebase`);
         setActiveTab("inventory");
       }catch{showToast("Failed to read Excel file","error");setSyncing(false);}
     };
@@ -863,7 +863,7 @@ export default function App(){
             <div>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
                 <div style={{display:"flex",alignItems:"center",gap:10}}>
-                  <div className="sec" style={{margin:0}}>{activeBox} — {filteredRows.length} Properties</div>
+                  <div className="sec" style={{margin:0}}>{activeBox} - {filteredRows.length} Properties</div>
                   {activeBoxStat.pct>=80&&<span className={`badge ${activeBoxStat.pct>=100?"badge-r":"badge-a"}`}>{activeBoxStat.pct}%{activeBoxStat.pct>=100?" 🔒":""}</span>}
                 </div>
                 <input placeholder="Search..." value={invSearch} onChange={e=>setInvSearch(e.target.value)} style={{width:220}}/>
@@ -885,7 +885,7 @@ export default function App(){
                           <tr key={row._id}>
                             <td style={{color:"#605040",fontSize:11}}>{row["Lock Box No."]}</td>
                             <td style={{color:"#e0d0b0",maxWidth:240,fontSize:12}}>{row["Property Address"]}</td>
-                            {KEY_TYPES.map(k=>(<td key={k} style={{textAlign:"center"}}>{row[k]>0?<span className={`badge ${row[k]>=3?"badge-h":"badge-a"}`}>{row[k]}</span>:<span className="badge badge-z">—</span>}</td>))}
+                            {KEY_TYPES.map(k=>(<td key={k} style={{textAlign:"center"}}>{row[k]>0?<span className={`badge ${row[k]>=3?"badge-h":"badge-a"}`}>{row[k]}</span>:<span className="badge badge-z">-</span>}</td>))}
                             <td style={{textAlign:"center"}}><span className={`badge ${tot>0?"badge-a":"badge-z"}`}>{tot}</span></td>
                             <td><div style={{display:"flex",gap:5}}>
                               <button className="btn btn-edit" onClick={()=>setEditRow({...row,_box:activeBox})}>Edit</button>
@@ -912,8 +912,8 @@ export default function App(){
               <div className="fg">
                 <div><div className="lbl">Property Address</div>
                   <AddressInput value={txAddress} onChange={(v,box)=>{setTxAddress(v);if(box)setTxBox(box);}} onSelect={(a,b)=>{setTxAddress(a);setTxBox(b);}}
-                    onAddNew={(q,box)=>{setAddAddress(q);setAddBox(box);setAddExisting(false);navigateTo("add");showToast(`Switched to Add — pre-filled in ${box}`);}}
-                    allEntries={entries} boxes={boxes} boxStats={boxStats} activeBox={activeBox} placeholder="Type address — all boxes..."/>
+                    onAddNew={(q,box)=>{setAddAddress(q);setAddBox(box);setAddExisting(false);navigateTo("add");showToast(`Switched to Add - pre-filled in ${box}`);}}
+                    allEntries={entries} boxes={boxes} boxStats={boxStats} activeBox={activeBox} placeholder="Type address - all boxes..."/>
                 </div>
                 {txAddress&&(
                   <div style={{background:"#0a0a08",border:"1px solid #2a2010",borderRadius:6,padding:"12px 14px"}}>
@@ -959,7 +959,7 @@ export default function App(){
                     const grandTotal=KEY_TYPES.reduce((s:number,k:string)=>s+(totals[k]||0),0);
                     return (
                       <div style={{marginTop:8,background:"#0a0a08",border:"1px solid #2a2010",borderRadius:6,padding:"10px 14px"}}>
-                        <div style={{fontSize:10,color:"#806040",letterSpacing:1,textTransform:"uppercase" as const,marginBottom:8}}>{addBox} — Current Keys</div>
+                        <div style={{fontSize:10,color:"#806040",letterSpacing:1,textTransform:"uppercase" as const,marginBottom:8}}>{addBox} - Current Keys</div>
                         <div style={{display:"flex",flexWrap:"wrap" as const,gap:6,marginBottom:8}}>
                           {KEY_TYPES.map(k=>(<div key={k} style={{display:"flex",alignItems:"center",gap:4,fontSize:12,borderRadius:6,padding:"3px 8px",color:(totals[k]||0)>0?"#c8960c":"#404040",background:(totals[k]||0)>0?"rgba(200,150,12,.08)":"rgba(50,50,50,.15)",border:`1px solid ${(totals[k]||0)>0?"rgba(200,150,12,.25)":"#252525"}`}}><span>{KEY_ICONS[k]}</span><span style={{fontSize:10,color:"#806040"}}>{k.replace(" Key","")}</span><strong style={{color:(totals[k]||0)>0?"#e8aa0e":"#505050"}}>{totals[k]||0}</strong></div>))}
                         </div>
@@ -981,7 +981,7 @@ export default function App(){
                   const existRow=(data[addBox]||[]).find(r=>r["Property Address"].toLowerCase()===addAddress.toLowerCase());
                   if(!existRow) return null;
                   return (<div style={{background:"#0a0a08",border:"1px solid rgba(200,150,12,.3)",borderRadius:6,padding:"12px 14px"}}>
-                    <div className="lbl" style={{color:"#c8960c",marginBottom:6}}>⚡ UPDATING — Lock Box #{existRow["Lock Box No."]}</div>
+                    <div className="lbl" style={{color:"#c8960c",marginBottom:6}}>⚡ UPDATING - Lock Box #{existRow["Lock Box No."]}</div>
                     <div style={{display:"flex",flexWrap:"wrap",gap:8}}>{KEY_TYPES.map(k=>(<div key={k} style={{fontSize:12,color:(existRow[k]||0)>0?"#c8960c":"#404040"}}>{KEY_ICONS[k]} {k}: <strong>{existRow[k]||0}</strong></div>))}</div>
                   </div>);
                 })()}
@@ -1026,7 +1026,7 @@ export default function App(){
           {activeTab==="history"&&(
             <div>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:10}}>
-                <div className="sec" style={{margin:0}}>History — {filteredLog.length} records</div>
+                <div className="sec" style={{margin:0}}>History - {filteredLog.length} records</div>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                   <input placeholder="Search..." value={logSearch} onChange={e=>setLogSearch(e.target.value)} style={{width:200}}/>
                   <select value={logFilter} onChange={e=>setLogFilter(e.target.value)} style={{padding:"8px 10px"}}>
@@ -1200,4 +1200,3 @@ export default function App(){
     </div>
   );
 }
-──────────────────────────────────────────
