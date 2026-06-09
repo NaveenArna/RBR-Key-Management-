@@ -768,6 +768,7 @@ export default function App(){
   const [clearPinDigits,setClearPinDigits]=useState<string[]>([]);
   const [clearPinError,setClearPinError]=useState(false);
   const [clearPinShake,setClearPinShake]=useState(false);
+  const [selectedClearBoxes,setSelectedClearBoxes]=useState<string[]>([]);
   const [toast,setToast]=useState<{msg:string;type:string}|null>(null);
   const toastTimer=useRef<ReturnType<typeof setTimeout>>();
   const importRef=useRef<HTMLInputElement>(null);
@@ -1114,10 +1115,22 @@ export default function App(){
       const empty:Record<string,PropertyRow[]>={};
       for(const box of Object.keys(data)) empty[box]=[];
       setData(empty);setTxLog([]);
-      try{await Promise.all(Object.keys(data).map(b=>fbClearBox(b)));await fbClearHistory();}catch{}
+      try{
+        await Promise.all(Object.keys(data).map(b=>fbClearBox(b)));
+        await fbClearHistory();
+        localStorage.removeItem("rbr_seed_done"); // allow re-seed after full clear
+      }catch{}
       showToast("✓ All data cleared");
     } else if(clearTarget==="history"){
       setTxLog([]);try{await fbClearHistory();}catch{};showToast("✓ History cleared");
+    } else if(clearTarget==="selected"){
+      // Delete multiple selected boxes
+      for(const box of selectedClearBoxes){
+        setData(prev=>({...prev,[box]:[]}));
+        try{await fbClearBox(box);}catch{}
+      }
+      showToast(`✓ Cleared: ${selectedClearBoxes.join(", ")}`);
+      setSelectedClearBoxes([]);
     } else {
       setData(prev=>({...prev,[clearTarget]:[]}));
       try{await fbClearBox(clearTarget);}catch{};showToast(`✓ ${clearTarget} cleared`);
@@ -1158,13 +1171,23 @@ export default function App(){
             "Pen drive":parseInt(r["Pen drive"])||0,"Smart Key":parseInt(r["Smart Key"])||0,"Other Key":parseInt(r["Other Key"])||0,
             _id:`${sheetName}-import-${i}-${Date.now()}`
           })).filter(r=>r["Property Address"].length>0);
-          setData(prev=>({...prev,[sheetName]:imported}));
-          setBoxSettings(prev=>prev[sheetName]?prev:{...prev,[sheetName]:{maxProps:DEFAULT_MAX}});
-          // sync to Firebase
-          await fbClearBox(sheetName); // fbClearBox already uses safeId internally
+          const safeBox=safeId(sheetName); // BOX 1 -> BOX_1 for Firebase path
+          // Update local state using safeBox name for consistency
+          setData(prev=>({...prev,[safeBox]:imported}));
+          setBoxSettings(prev=>prev[safeBox]?prev:{...prev,[safeBox]:{maxProps:DEFAULT_MAX}});
+          // Save settings to Firebase
+          await setDoc(doc(db,"settings",safeBox),{maxProps:DEFAULT_MAX,updatedAt:serverTimestamp()},{merge:true});
+          // Sync to Firebase using safeBox
+          await fbClearBox(safeBox);
           const batch=writeBatch(db);
-          imported.forEach(r=>{const ref=doc(db,"boxes",sheetName,"properties",safeId(r._id));batch.set(ref,{lockNo:r["Lock Box No."],address:r["Property Address"],mainDoor:r["Main Door Key"],mailBox:r["Mail Box Key"],penDrive:r["Pen drive"],smartKey:r["Smart Key"],otherKey:r["Other Key"],_id:r._id,updatedAt:serverTimestamp()});});
+          imported.forEach(r=>{
+            const docId=safeId(r._id);
+            const ref=doc(db,"boxes",safeBox,"properties",docId);
+            batch.set(ref,{lockNo:r["Lock Box No."],address:r["Property Address"],mainDoor:r["Main Door Key"],mailBox:r["Mail Box Key"],penDrive:r["Pen drive"],smartKey:r["Smart Key"],otherKey:r["Other Key"],_id:docId,updatedAt:serverTimestamp()});
+          });
           await batch.commit();
+          // Set seed flag so app knows data exists
+          localStorage.setItem("rbr_seed_done","1");
           totalImported+=imported.length;
         }
         setSyncing(false);
@@ -1688,7 +1711,7 @@ export default function App(){
       </div></div>)}
 
       {/* Clear Data Modal */}
-      {showClearData&&(<div className="mo" onClick={()=>{setShowClearData(false);setClearStep(1);setClearConfirmText("");setClearPinDigits([]);setClearPinError(false);}}>
+      {showClearData&&(<div className="mo" onClick={()=>{setShowClearData(false);setClearStep(1);setClearConfirmText("");setClearPinDigits([]);setClearPinError(false);setSelectedClearBoxes([]); setClearTarget("all");}}>
         <div className="md" style={{width:400}} onClick={e=>e.stopPropagation()}>
           <div style={{fontSize:26,textAlign:"center",marginBottom:8}}>⚠️</div>
           <div style={{fontSize:14,color:"#e06060",fontWeight:"bold",textAlign:"center",marginBottom:4,letterSpacing:1}}>CLEAR DATA</div>
@@ -1699,12 +1722,35 @@ export default function App(){
           {clearStep===1&&(
             <>
               <div className="lbl" style={{marginBottom:10}}>Select what to delete</div>
-              {boxes.map(box=>(
-                <div key={box} onClick={()=>setClearTarget(box)} style={{padding:"10px 14px",borderRadius:6,cursor:"pointer",marginBottom:6,border:`1px solid ${clearTarget===box?"#c05050":"#2a2010"}`,background:clearTarget===box?"rgba(200,80,80,.1)":"transparent",display:"flex",alignItems:"center",justifyContent:"space-between",transition:"all .15s"}}>
-                  <div><div style={{fontSize:13,color:clearTarget===box?"#e06060":"#e0d0b0",fontWeight:"bold"}}>📦 {box}</div><div style={{fontSize:10,color:"#604030",marginTop:2}}>{(data[box]||[]).length} properties · {boxStats[box]?.keys||0} keys</div></div>
-                  <div style={{fontSize:11,color:clearTarget===box?"#e06060":"#504030",border:`1px solid ${clearTarget===box?"rgba(200,80,80,.4)":"#2a2010"}`,padding:"2px 8px",borderRadius:4}}>{clearTarget===box?"✓":"Select"}</div>
-                </div>
-              ))}
+              {/* Multi-select boxes */}
+              <div style={{marginBottom:6}}>
+                <div style={{fontSize:10,color:"#806040",letterSpacing:1,marginBottom:6}}>SELECT BOXES TO CLEAR (tap to toggle)</div>
+                {boxes.map(box=>{
+                  const sel=selectedClearBoxes.includes(box);
+                  return (
+                    <div key={box} onClick={()=>{
+                      setSelectedClearBoxes(prev=>sel?prev.filter(b=>b!==box):[...prev,box]);
+                      setClearTarget("selected");
+                    }} style={{padding:"10px 14px",borderRadius:6,cursor:"pointer",marginBottom:6,
+                      border:`1px solid ${sel?"#c05050":"#2a2010"}`,
+                      background:sel?"rgba(200,80,80,.1)":"transparent",
+                      display:"flex",alignItems:"center",justifyContent:"space-between",transition:"all .15s"}}>
+                      <div>
+                        <div style={{fontSize:13,color:sel?"#e06060":"#e0d0b0",fontWeight:"bold"}}>📦 {box}</div>
+                        <div style={{fontSize:10,color:"#604030",marginTop:2}}>{(data[box]||[]).length} properties · {boxStats[box]?.keys||0} keys</div>
+                      </div>
+                      <div style={{width:20,height:20,borderRadius:4,border:`2px solid ${sel?"#c05050":"#3a3020"}`,background:sel?"#c05050":"transparent",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:"#fff",flexShrink:0}}>
+                        {sel?"✓":""}
+                      </div>
+                    </div>
+                  );
+                })}
+                {selectedClearBoxes.length>0&&(
+                  <div style={{fontSize:11,color:"#e06060",marginBottom:4}}>
+                    {selectedClearBoxes.length} box{selectedClearBoxes.length>1?"es":""} selected — {selectedClearBoxes.reduce((s,b)=>s+(data[b]||[]).length,0)} properties total
+                  </div>
+                )}
+              </div>
               <div onClick={()=>setClearTarget("history")} style={{padding:"10px 14px",borderRadius:6,cursor:"pointer",marginBottom:6,border:`1px solid ${clearTarget==="history"?"#c05050":"#2a2010"}`,background:clearTarget==="history"?"rgba(200,80,80,.1)":"transparent",display:"flex",alignItems:"center",justifyContent:"space-between",transition:"all .15s"}}>
                 <div><div style={{fontSize:13,color:clearTarget==="history"?"#e06060":"#e0d0b0",fontWeight:"bold"}}>📜 History Only</div><div style={{fontSize:10,color:"#604030",marginTop:2}}>{txLog.length} records</div></div>
                 <div style={{fontSize:11,color:clearTarget==="history"?"#e06060":"#504030",border:`1px solid ${clearTarget==="history"?"rgba(200,80,80,.4)":"#2a2010"}`,padding:"2px 8px",borderRadius:4}}>{clearTarget==="history"?"✓":"Select"}</div>
@@ -1723,7 +1769,7 @@ export default function App(){
           {clearStep===2&&(
             <>
               <div style={{background:"rgba(200,80,80,.08)",border:"1px solid rgba(200,80,80,.2)",borderRadius:6,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#e06060"}}>
-                Deleting: <strong>{clearTarget==="all"?"ALL DATA":clearTarget==="history"?"History Only":clearTarget}</strong>
+                Deleting: <strong>{clearTarget==="all"?"ALL DATA":clearTarget==="history"?"History Only":clearTarget==="selected"?`Boxes: ${selectedClearBoxes.join(", ")}`:clearTarget}</strong>
               </div>
               <div style={{fontSize:13,color:"#806040",textAlign:"center",marginBottom:14}}>Enter PIN to authorize</div>
               <div className={clearPinShake?"shake":""} style={{display:"flex",justifyContent:"center",gap:12,marginBottom:18}}>
@@ -1744,8 +1790,8 @@ export default function App(){
           {clearStep===3&&(
             <>
               <div style={{background:"rgba(200,80,80,.08)",border:"1px solid rgba(200,80,80,.25)",borderRadius:6,padding:"12px 14px",marginBottom:14}}>
-                <div style={{fontSize:12,color:"#e06060",fontWeight:"bold",marginBottom:4}}>⚠ Deleting: {clearTarget==="all"?"ALL DATA":clearTarget==="history"?"History":clearTarget}</div>
-                <div style={{fontSize:11,color:"#806040"}}>{clearTarget==="all"?`${Object.values(data).flat().length} properties + ${txLog.length} records`:clearTarget==="history"?`${txLog.length} records`:`${(data[clearTarget]||[]).length} properties`} will be permanently deleted</div>
+                <div style={{fontSize:12,color:"#e06060",fontWeight:"bold",marginBottom:4}}>⚠ Deleting: {clearTarget==="all"?"ALL DATA":clearTarget==="history"?"History":clearTarget==="selected"?`${selectedClearBoxes.length} box(es)`:clearTarget}</div>
+                <div style={{fontSize:11,color:"#806040"}}>{clearTarget==="all"?`${Object.values(data).flat().length} properties + ${txLog.length} records`:clearTarget==="history"?`${txLog.length} records`:clearTarget==="selected"?`${selectedClearBoxes.reduce((s,b)=>s+(data[b]||[]).length,0)} properties`:`${(data[clearTarget]||[]).length} properties`} will be permanently deleted</div>
               </div>
               <div className="lbl" style={{marginBottom:6}}>Type <strong style={{color:"#e06060",letterSpacing:2}}>DELETE</strong> to confirm</div>
               <input value={clearConfirmText} onChange={e=>setClearConfirmText(e.target.value)} placeholder='Type DELETE here' autoFocus style={{width:"100%",marginBottom:14,borderColor:clearConfirmText==="DELETE"?"#c05050":undefined}}/>
@@ -1823,4 +1869,3 @@ export default function App(){
     </div>
   );
 }
-
