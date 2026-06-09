@@ -95,7 +95,7 @@ function getBoxStats(data:Record<string,PropertyRow[]>,settings:Record<string,Bo
 function safeId(id:string){return id.replace(/[^a-zA-Z0-9_-]/g,"_");}
 async function fbSaveProperty(box:string, row:PropertyRow){
   // Use _id as doc path (it equals the Firestore doc ID from onSnapshot)
-  await setDoc(doc(db,"boxes",box,"properties",row._id),{
+  await setDoc(doc(db,"boxes",safeId(box),"properties",row._id),{
     lockNo: row["Lock Box No."],
     address: row["Property Address"],
     mainDoor: row["Main Door Key"],
@@ -112,7 +112,7 @@ async function fbDeleteProperty(box:string, id:string, address:string){
   // This handles any ID mismatch from old uploads
   try {
     // First try direct delete by id
-    await deleteDoc(doc(db,"boxes",box,"properties",id));
+    await deleteDoc(doc(db,"boxes",safeId(box),"properties",id));
   } catch(e) {
     console.warn("Direct delete failed, trying query by address:", e);
   }
@@ -125,13 +125,13 @@ async function fbDeleteProperty(box:string, id:string, address:string){
   }
 }
 async function fbSaveBoxSettings(box:string, maxProps:number){
-  await setDoc(doc(db,"settings",box),{maxProps, updatedAt:serverTimestamp()},{merge:true});
+  await setDoc(doc(db,"settings",safeId(box)),{maxProps, updatedAt:serverTimestamp()},{merge:true});
 }
 async function fbSaveLog(log:TxLog){
   await setDoc(doc(db,"history",log.id),{...log, createdAt:serverTimestamp()});
 }
 async function fbClearBox(box:string){
-  const snap=await getDocs(collection(db,"boxes",box,"properties"));
+  const snap=await getDocs(collection(db,"boxes",safeId(box),"properties"));
   const batch=writeBatch(db);
   snap.docs.forEach(d=>batch.delete(d.ref));
   await batch.commit();
@@ -462,11 +462,11 @@ export default function App(){
         for(const [box,rows] of Object.entries(SEED_DATA)){
           for(const r of rows as any[]){
             const id=r._id||`${box}-${Math.random()}`;
-            const ref=doc(db,"boxes",box,"properties",safeId(id));
+            const ref=doc(db,"boxes",safeId(box),"properties",safeId(id));
             batch.set(ref,{lockNo:r["Lock Box No."]||0,address:r["Property Address"]||"",mainDoor:r["Main Door Key"]||0,mailBox:r["Mail Box Key"]||0,penDrive:r["Pen drive"]||0,smartKey:r["Smart Key"]||0,otherKey:r["Other Key"]||0,_id:id,updatedAt:serverTimestamp()});
           }
           // default settings
-          const sref=doc(db,"settings",box);
+          const sref=doc(db,"settings",safeId(box));
           batch.set(sref,{maxProps:DEFAULT_MAX,updatedAt:serverTimestamp()},{mergeFields:["maxProps"]});
         }
         await batch.commit();
@@ -480,7 +480,7 @@ export default function App(){
       const knownBoxes=new Set(loadedBoxes);
 
       for(const box of loadedBoxes){
-        const unsub=onSnapshot(collection(db,"boxes",box,"properties"),(snap)=>{
+        const unsub=onSnapshot(collection(db,"boxes",safeId(box),"properties"),(snap)=>{
           const rows:PropertyRow[]=snap.docs.map(d=>fbRowToProperty(d.data(), d.id));
           rows.sort((a,b)=>a["Lock Box No."]-b["Lock Box No."]);
           setData(prev=>({...prev,[box]:rows}));
@@ -631,7 +631,7 @@ export default function App(){
     let deleted=false;
     // Try 1: delete by exact document id
     try{
-      await deleteDoc(doc(db,"boxes",box,"properties",id));
+      await deleteDoc(doc(db,"boxes",safeId(box),"properties",id));
       deleted=true;
     }catch(e1:any){
       showToast(`Error: ${e1?.code||e1?.message||"unknown"}`, "error");
@@ -639,7 +639,7 @@ export default function App(){
     // Try 2: query by address and delete all matching docs
     if(!deleted){
       try{
-        const q=query(collection(db,"boxes",box,"properties"),where("address","==",address));
+        const q=query(collection(db,"boxes",safeId(box),"properties"),where("address","==",address));
         const snap=await getDocs(q);
         for(const d of snap.docs){ await deleteDoc(d.ref); deleted=true; }
       }catch(e2:any){
@@ -739,7 +739,7 @@ export default function App(){
           setData(prev=>({...prev,[sheetName]:imported}));
           setBoxSettings(prev=>prev[sheetName]?prev:{...prev,[sheetName]:{maxProps:DEFAULT_MAX}});
           // sync to Firebase
-          await fbClearBox(sheetName);
+          await fbClearBox(sheetName); // fbClearBox already uses safeId internally
           const batch=writeBatch(db);
           imported.forEach(r=>{const ref=doc(db,"boxes",sheetName,"properties",safeId(r._id));batch.set(ref,{lockNo:r["Lock Box No."],address:r["Property Address"],mainDoor:r["Main Door Key"],mailBox:r["Mail Box Key"],penDrive:r["Pen drive"],smartKey:r["Smart Key"],otherKey:r["Other Key"],_id:r._id,updatedAt:serverTimestamp()});});
           await batch.commit();
