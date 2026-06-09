@@ -454,11 +454,16 @@ export default function App(){
     );
     unsubs.push(histUnsub);
 
-    // Load boxes from Firebase; if empty, seed with initial data
+    // Load boxes from Firebase
     (async()=>{
-      const boxSnap=await getDocs(collection(db,"boxes"));
-      if(boxSnap.empty){
-        // First time - upload seed data
+      // Check if seed was already uploaded using localStorage flag
+      const seedDone = localStorage.getItem("rbr_seed_done");
+
+      // Check actual properties exist in BOX_1
+      const propSnap = await getDocs(collection(db,"boxes","BOX_1","properties"));
+
+      if(!seedDone && propSnap.empty){
+        // First time only - upload seed data
         setSyncing(true);
         showToastFn("Uploading initial data to Firebase...","success");
         const batch=writeBatch(db);
@@ -468,17 +473,23 @@ export default function App(){
             const ref=doc(db,"boxes",safeId(box),"properties",safeId(id));
             batch.set(ref,{lockNo:r["Lock Box No."]||0,address:r["Property Address"]||"",mainDoor:r["Main Door Key"]||0,mailBox:r["Mail Box Key"]||0,penDrive:r["Pen drive"]||0,smartKey:r["Smart Key"]||0,otherKey:r["Other Key"]||0,_id:id,updatedAt:serverTimestamp()});
           }
-          // default settings
           const sref=doc(db,"settings",safeId(box));
           batch.set(sref,{maxProps:DEFAULT_MAX,updatedAt:serverTimestamp()},{mergeFields:["maxProps"]});
         }
         await batch.commit();
+        localStorage.setItem("rbr_seed_done","1"); // never seed again
         setSyncing(false);
         showToastFn("✓ Data uploaded to Firebase","success");
+      } else if(propSnap.size > 0 && !seedDone){
+        // Data exists but flag not set - set it now
+        localStorage.setItem("rbr_seed_done","1");
       }
 
-      // Now set up per-box listeners
-      const loadedBoxes=boxSnap.empty?Object.keys(SEED_DATA):boxSnap.docs.map(d=>d.id);
+      // Get all box names from Firebase settings collection
+      const settingsSnap = await getDocs(collection(db,"settings"));
+      const loadedBoxes = settingsSnap.empty
+        ? Object.keys(SEED_DATA)
+        : settingsSnap.docs.map(d=>d.id);
       const knownBoxes=new Set(loadedBoxes);
 
       for(const box of loadedBoxes){
@@ -1268,5 +1279,3 @@ export default function App(){
     </div>
   );
 }
-
-  
