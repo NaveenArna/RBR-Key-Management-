@@ -622,27 +622,32 @@ export default function App(){
   }
   async function confirmDeleteNow(){
     if(!confirmDelete) return;
-    const {box,id}=confirmDelete;
-    console.log("Deleting:", box, id); // debug
-    // optimistic UI update
+    const {box,id,address}=confirmDelete;
+    // optimistic UI update first
     setData(prev=>({...prev,[box]:prev[box].filter(r=>r._id!==id)}));
     if(editRow?._id===id) setEditRow(null);
     setConfirmDelete(null);
     setSyncing(true);
+    let deleted=false;
+    // Try 1: delete by exact document id
     try{
-      await fbDeleteProperty(box,id,confirmDelete.address);
-      console.log("Delete success:", id, confirmDelete.address);
-      showToast("Property deleted");
-    }catch(err:any){
-      console.error("Delete error:", err);
-      showToast(`Delete failed: ${err?.message||"Check Firebase rules"}`, "error");
-      // re-fetch to restore correct state
-      const {getDocs, collection:col} = await import("firebase/firestore");
-      const snap=await getDocs(col(db,"boxes",box,"properties"));
-      const rows=snap.docs.map((d:any)=>fbRowToProperty(d.data(), d.id));
-      rows.sort((a:any,b:any)=>a["Lock Box No."]-b["Lock Box No."]);
-      setData(prev=>({...prev,[box]:rows}));
+      await deleteDoc(doc(db,"boxes",box,"properties",id));
+      deleted=true;
+    }catch(e1:any){
+      showToast(`Error: ${e1?.code||e1?.message||"unknown"}`, "error");
     }
+    // Try 2: query by address and delete all matching docs
+    if(!deleted){
+      try{
+        const q=query(collection(db,"boxes",box,"properties"),where("address","==",address));
+        const snap=await getDocs(q);
+        for(const d of snap.docs){ await deleteDoc(d.ref); deleted=true; }
+      }catch(e2:any){
+        showToast(`Error2: ${e2?.code||e2?.message||"unknown"}`, "error");
+      }
+    }
+    if(deleted) showToast("Property deleted");
+    else showToast("Could not delete - check Firebase Rules", "error");
     setSyncing(false);
   }
 
