@@ -92,8 +92,9 @@ function getBoxStats(data:Record<string,PropertyRow[]>,settings:Record<string,Bo
 // ─────────────────────────────────────────────────────────────────────────────
 // Firebase helpers
 // ─────────────────────────────────────────────────────────────────────────────
+function safeId(id:string){return id.replace(/[^a-zA-Z0-9_-]/g,"_");}
 async function fbSaveProperty(box:string, row:PropertyRow){
-  await setDoc(doc(db,"boxes",box,"properties",row._id),{
+  await setDoc(doc(db,"boxes",box,"properties",safeId(row._id)),{
     lockNo: row["Lock Box No."],
     address: row["Property Address"],
     mainDoor: row["Main Door Key"],
@@ -106,7 +107,7 @@ async function fbSaveProperty(box:string, row:PropertyRow){
   });
 }
 async function fbDeleteProperty(box:string, id:string){
-  await deleteDoc(doc(db,"boxes",box,"properties",id));
+  await deleteDoc(doc(db,"boxes",box,"properties",safeId(id)));
 }
 async function fbSaveBoxSettings(box:string, maxProps:number){
   await setDoc(doc(db,"settings",box),{maxProps, updatedAt:serverTimestamp()},{merge:true});
@@ -128,6 +129,8 @@ async function fbClearHistory(){
 }
 
 function fbRowToProperty(d:any): PropertyRow {
+  // Use stored _id (original with spaces) for UI matching
+  // safeId is only used for Firestore document path
   return {
     "Lock Box No.": d.lockNo||0,
     "Property Address": d.address||"",
@@ -444,7 +447,7 @@ export default function App(){
         for(const [box,rows] of Object.entries(SEED_DATA)){
           for(const r of rows as any[]){
             const id=r._id||`${box}-${Math.random()}`;
-            const ref=doc(db,"boxes",box,"properties",id);
+            const ref=doc(db,"boxes",box,"properties",safeId(id));
             batch.set(ref,{lockNo:r["Lock Box No."]||0,address:r["Property Address"]||"",mainDoor:r["Main Door Key"]||0,mailBox:r["Mail Box Key"]||0,penDrive:r["Pen drive"]||0,smartKey:r["Smart Key"]||0,otherKey:r["Other Key"]||0,_id:id,updatedAt:serverTimestamp()});
           }
           // default settings
@@ -577,12 +580,25 @@ export default function App(){
   }
   async function confirmDeleteNow(){
     if(!confirmDelete) return;
-    setData(prev=>({...prev,[confirmDelete.box]:prev[confirmDelete.box].filter(r=>r._id!==confirmDelete.id)}));
-    if(editRow?._id===confirmDelete.id) setEditRow(null);
+    const {box,id}=confirmDelete;
+    // optimistic UI update
+    setData(prev=>({...prev,[box]:prev[box].filter(r=>r._id!==id)}));
+    if(editRow?._id===id) setEditRow(null);
+    setConfirmDelete(null);
     setSyncing(true);
-    try{await fbDeleteProperty(confirmDelete.box,confirmDelete.id);}catch{}
+    try{
+      await fbDeleteProperty(box,id);
+      showToast("Property deleted");
+    }catch(err:any){
+      // Revert optimistic update if Firebase fails
+      showToast(`Delete failed: ${err?.message||"Check Firebase rules"}`, "error");
+      // re-fetch from Firebase to restore correct state
+      const snap=await import("firebase/firestore").then(({getDocs,collection})=>getDocs(collection(db,"boxes",box,"properties")));
+      const rows=snap.docs.map((d:any)=>fbRowToProperty(d.data()));
+      rows.sort((a:any,b:any)=>a["Lock Box No."]-b["Lock Box No."]);
+      setData(prev=>({...prev,[box]:rows}));
+    }
     setSyncing(false);
-    setConfirmDelete(null);showToast("Property deleted");
   }
 
   async function handleSaveEdit(){
@@ -675,7 +691,7 @@ export default function App(){
           // sync to Firebase
           await fbClearBox(sheetName);
           const batch=writeBatch(db);
-          imported.forEach(r=>{const ref=doc(db,"boxes",sheetName,"properties",r._id);batch.set(ref,{lockNo:r["Lock Box No."],address:r["Property Address"],mainDoor:r["Main Door Key"],mailBox:r["Mail Box Key"],penDrive:r["Pen drive"],smartKey:r["Smart Key"],otherKey:r["Other Key"],_id:r._id,updatedAt:serverTimestamp()});});
+          imported.forEach(r=>{const ref=doc(db,"boxes",sheetName,"properties",safeId(r._id));batch.set(ref,{lockNo:r["Lock Box No."],address:r["Property Address"],mainDoor:r["Main Door Key"],mailBox:r["Mail Box Key"],penDrive:r["Pen drive"],smartKey:r["Smart Key"],otherKey:r["Other Key"],_id:r._id,updatedAt:serverTimestamp()});});
           await batch.commit();
           totalImported+=imported.length;
         }
@@ -1200,3 +1216,5 @@ export default function App(){
     </div>
   );
 }
+
+  
