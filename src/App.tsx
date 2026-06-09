@@ -1,4 +1,4 @@
- import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
 import { initializeApp } from "firebase/app";
 import {
@@ -195,26 +195,61 @@ function LoginScreen({ onLogin }: LoginScreenProps) {
     setLoading(true); setError("");
     try {
       const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
-      // Load user profile from Firestore
-      const userDoc = await getDocs(query(collection(db,"users"), where("uid","==",cred.user.uid)));
-      if(userDoc.empty){
+      const uid = cred.user.uid;
+      const emailLower = email.trim().toLowerCase();
+
+      // Try find user by UID first
+      let userSnap = await getDocs(query(collection(db,"users"), where("uid","==",uid)));
+
+      // If not found by UID, try by email (handles UID mismatch)
+      if(userSnap.empty){
+        userSnap = await getDocs(query(collection(db,"users"), where("email","==",emailLower)));
+      }
+      if(userSnap.empty){
+        userSnap = await getDocs(query(collection(db,"users"), where("email","==",email.trim())));
+      }
+
+      if(userSnap.empty){
+        // Auto-create admin profile for first user if users collection is empty
+        const allUsers = await getDocs(collection(db,"users"));
+        if(allUsers.empty){
+          // No users exist yet - make this person admin
+          const adminUser: AppUser = {
+            uid, email: email.trim(), name: email.split("@")[0],
+            role:"admin", canAdd:true, canEdit:true, canDelete:true, active:true
+          };
+          await setDoc(doc(db,"users",uid), adminUser);
+          onLogin(adminUser);
+          setLoading(false); return;
+        }
         await signOut(auth);
-        setError("Access denied — contact admin");
+        setError(`No profile found for ${email.trim()} — add this user in Firestore users collection`);
         setLoading(false); return;
       }
-      const userData = userDoc.docs[0].data() as AppUser;
+
+      const userData = userSnap.docs[0].data() as AppUser;
+
+      // Update UID if it was found by email but UID didn't match
+      if(userData.uid !== uid){
+        await setDoc(doc(db,"users",uid), {...userData, uid}, {merge:true});
+        // Also fix old document if it had wrong id
+      }
+
       if(!userData.active){
         await signOut(auth);
         setError("Your account is disabled — contact admin");
         setLoading(false); return;
       }
-      onLogin(userData);
+      onLogin({...userData, uid});
     } catch(e: any) {
-      const msg = e.code === "auth/user-not-found" || e.code === "auth/wrong-password" || e.code === "auth/invalid-credential"
+      const code = (e as any).code||"";
+      const msg = code === "auth/user-not-found" || code === "auth/wrong-password" || code === "auth/invalid-credential"
         ? "Invalid email or password"
-        : e.code === "auth/too-many-requests"
+        : code === "auth/too-many-requests"
         ? "Too many attempts — try later"
-        : e.message || "Login failed";
+        : code === "auth/network-request-failed"
+        ? "Network error — check connection"
+        : `Error: ${code||e.message||"Login failed"}`;
       setError(msg);
     }
     setLoading(false);
