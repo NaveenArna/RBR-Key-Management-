@@ -189,6 +189,21 @@ function LoginScreen({ onLogin }: LoginScreenProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [showPass, setShowPass] = useState(false);
+  const [resetMsg, setResetMsg] = useState("");
+
+  async function handleForgotPassword(){
+    if(!email.trim()){ setError("Enter your email above first"); return; }
+    try {
+      const { sendPasswordResetEmail } = await import("firebase/auth");
+      await sendPasswordResetEmail(auth, email.trim());
+      setResetMsg("✓ Password reset email sent! Check your inbox (and spam folder)");
+    } catch(e:any){
+      const code = e.code||"";
+      if(code==="auth/user-not-found") setResetMsg("No account found with this email");
+      else if(code==="auth/invalid-email") setResetMsg("Invalid email address");
+      else setResetMsg(`Error: ${e.message||code}`);
+    }
+  }
 
   async function handleLogin() {
     if(!email || !password){ setError("Enter email and password"); return; }
@@ -307,6 +322,12 @@ function LoginScreen({ onLogin }: LoginScreenProps) {
         <div style={{textAlign:"center",marginTop:16,fontSize:11,color:"#3a2010"}}>
           Contact your admin to get access
         </div>
+        <div style={{textAlign:"center",marginTop:10}}>
+          <button onClick={handleForgotPassword} style={{background:"transparent",border:"none",color:"#806040",cursor:"pointer",fontSize:11,fontFamily:'"Courier New",monospace',textDecoration:"underline"}}>
+            Forgot password?
+          </button>
+        </div>
+        {resetMsg&&<div style={{textAlign:"center",marginTop:8,fontSize:11,color:resetMsg.startsWith("✓")?"#50c880":"#e06060",background:resetMsg.startsWith("✓")?"rgba(80,200,80,.08)":"rgba(200,80,80,.08)",border:`1px solid ${resetMsg.startsWith("✓")?"rgba(80,200,80,.2)":"rgba(200,80,80,.2)"}`,borderRadius:6,padding:"8px 14px"}}>{resetMsg}</div>}
       </div>
     </div>
   );
@@ -364,6 +385,19 @@ function UserManagement({ currentUser, onClose }: UserManagementProps) {
   }
 
   async function toggleActive(user: AppUser){
+    // Prevent disabling yourself
+    if(user.uid===currentUser.uid){
+      setMsg("You cannot disable your own account");
+      return;
+    }
+    // Prevent disabling last active admin
+    if(user.role==="admin" && user.active){
+      const activeAdmins=users.filter(u=>u.role==="admin"&&u.active);
+      if(activeAdmins.length<=1){
+        setMsg("Cannot disable the last active admin");
+        return;
+      }
+    }
     const updated = {...user, active: !user.active};
     await setDoc(doc(db,"users",user.uid), updated);
     setUsers(prev=>prev.map(u=>u.uid===user.uid?updated:u));
@@ -676,6 +710,7 @@ export default function App(){
   const [currentUser,setCurrentUser]=useState<AppUser|null>(null);
   const [authChecked,setAuthChecked]=useState(false); // true once Firebase auth state resolved
   const [showUserMgmt,setShowUserMgmt]=useState(false);
+  const [showChangePwd,setShowChangePwd]=useState(false);
   const [locked,setLocked]=useState(true);
   const [showChangePin,setShowChangePin]=useState(false);
   const inactivityTimer=useRef<ReturnType<typeof setTimeout>>();
@@ -1224,7 +1259,8 @@ export default function App(){
           <input ref={importRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={handleImport}/>
           <button className="btn btn-outline" onClick={()=>importRef.current?.click()} style={{fontSize:10,padding:"6px 8px",color:"#50c880",borderColor:"#207020"}}>⬆ Import</button>
           <button className="btn btn-outline" onClick={()=>setShowNewBox(true)} style={{fontSize:10,padding:"6px 8px"}}>➕</button>
-          <button className="btn btn-outline" onClick={()=>setShowChangePin(true)} style={{fontSize:10,padding:"6px 8px"}}>🔒</button>
+          <button className="btn btn-outline" onClick={()=>setShowChangePin(true)} style={{fontSize:10,padding:"6px 8px"}} title="Change PIN">🔒</button>
+          <button className="btn btn-outline" onClick={()=>setShowChangePwd(true)} style={{fontSize:10,padding:"6px 8px"}} title="Change Password">🔑</button>
           <button className="btn btn-amber" onClick={exportXLSX} style={{fontSize:10,padding:"6px 8px"}}>⬇</button>
           {currentUser?.role==="admin"&&<button onClick={()=>setShowUserMgmt(true)} style={{background:"transparent",border:"1px solid #203050",color:"#5090c0",borderRadius:4,padding:"6px 8px",fontSize:10,cursor:"pointer",fontFamily:'"Courier New",monospace',fontWeight:"bold"}} title="Manage Users">👥</button>}
           {currentUser?.role==="admin"&&<button onClick={()=>{setShowClearData(true);setClearStep(1);setClearConfirmText("");setClearPinDigits([]);setClearPinError(false);}} style={{background:"transparent",border:"1px solid #5a2020",color:"#c05050",borderRadius:4,padding:"6px 8px",fontSize:10,cursor:"pointer",fontFamily:'"Courier New",monospace',fontWeight:"bold"}}>🗑</button>}
@@ -1706,9 +1742,65 @@ export default function App(){
         <UserManagement currentUser={currentUser} onClose={()=>setShowUserMgmt(false)}/>
       )}
 
+      {/* Change Password Modal */}
+      {showChangePwd&&(()=>{
+        const ChangePwdModal=()=>{
+          const [oldPwd,setOldPwd]=useState("");
+          const [newPwd,setNewPwd]=useState("");
+          const [confirmPwd,setConfirmPwd]=useState("");
+          const [msg,setMsg]=useState("");
+          const [saving,setSaving]=useState(false);
+
+          async function doChange(){
+            if(!oldPwd||!newPwd||!confirmPwd){setMsg("Fill all fields");return;}
+            if(newPwd.length<6){setMsg("New password must be at least 6 characters");return;}
+            if(newPwd!==confirmPwd){setMsg("Passwords do not match");return;}
+            setSaving(true);setMsg("");
+            try{
+              const user=auth.currentUser;
+              if(!user||!user.email) throw new Error("Not logged in");
+              // Re-authenticate first
+              const cred=EmailAuthProvider.credential(user.email,oldPwd);
+              await reauthenticateWithCredential(user,cred);
+              // Change password
+              await updatePassword(user,newPwd);
+              setMsg("✓ Password changed successfully!");
+              setTimeout(()=>setShowChangePwd(false),1500);
+            }catch(e:any){
+              const code=e.code||"";
+              if(code==="auth/wrong-password"||code==="auth/invalid-credential") setMsg("Current password is incorrect");
+              else if(code==="auth/weak-password") setMsg("New password is too weak");
+              else setMsg(`Error: ${e.message||code}`);
+            }
+            setSaving(false);
+          }
+
+          return (
+            <div className="mo" onClick={()=>setShowChangePwd(false)}>
+              <div className="md" style={{width:380}} onClick={e=>e.stopPropagation()}>
+                <div style={{fontSize:13,color:"#c8960c",fontWeight:"bold",marginBottom:16,letterSpacing:1}}>🔑 CHANGE PASSWORD</div>
+                <div style={{fontSize:11,color:"#806040",marginBottom:16}}>Signed in as: {currentUser?.email}</div>
+                <div className="fg">
+                  <div><div className="lbl">Current Password</div><input type="password" value={oldPwd} onChange={e=>setOldPwd(e.target.value)} style={{width:"100%"}} placeholder="Enter current password"/></div>
+                  <div><div className="lbl">New Password</div><input type="password" value={newPwd} onChange={e=>setNewPwd(e.target.value)} style={{width:"100%"}} placeholder="Min 6 characters"/></div>
+                  <div><div className="lbl">Confirm New Password</div><input type="password" value={confirmPwd} onChange={e=>setConfirmPwd(e.target.value)} style={{width:"100%"}} placeholder="Repeat new password"/></div>
+                  {msg&&<div style={{fontSize:12,padding:"8px 12px",borderRadius:6,background:msg.startsWith("✓")?"rgba(80,200,80,.1)":"rgba(200,80,80,.1)",color:msg.startsWith("✓")?"#50c880":"#e06060",border:`1px solid ${msg.startsWith("✓")?"rgba(80,200,80,.3)":"rgba(200,80,80,.3)"}`}}>{msg}</div>}
+                  <div style={{display:"flex",gap:10}}>
+                    <button className="btn btn-amber" onClick={doChange} disabled={saving} style={{flex:1,padding:"11px"}}>{saving?"Saving...":"Change Password"}</button>
+                    <button className="btn btn-outline" onClick={()=>setShowChangePwd(false)} style={{flex:1,padding:"11px"}}>Cancel</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        };
+        return <ChangePwdModal/>;
+      })()}
+
       {/* Toast */}
       {toast&&(<div style={{position:"fixed",bottom:22,right:22,zIndex:2000,background:toast.type==="error"?"#3a0a0a":"#0a1a0a",border:`1px solid ${toast.type==="error"?"#8a2020":"#207020"}`,color:toast.type==="error"?"#ff8080":"#80d080",padding:"11px 20px",borderRadius:8,fontSize:13,fontFamily:'"Courier New",monospace',boxShadow:"0 4px 20px rgba(0,0,0,.5)",animation:"slideIn .2s ease",maxWidth:400}}>{toast.msg}</div>)}
     </div>
   );
 }
 
+  
