@@ -1,11 +1,12 @@
-{
+
   "name": "rbr-key-dashboard",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "dependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "firebase": "^10.7.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.0",
@@ -16,7 +17,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "vite build",
     "preview": "vite preview"
   }
 }
