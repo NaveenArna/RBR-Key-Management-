@@ -1152,6 +1152,10 @@ export default function App(){
   }
 
   function handleImport(e:React.ChangeEvent<HTMLInputElement>){
+    if(currentUser?.role!=="admin"&&!currentUser?.canAdd){
+      showToast("No permission to import data","error");
+      e.target.value=""; return;
+    }
     const file=e.target.files?.[0];if(!file) return;
     const reader=new FileReader();
     reader.onload=async(evt)=>{
@@ -1301,13 +1305,15 @@ export default function App(){
         </div>
         <div style={{display:"flex",gap:6,flexShrink:0}}>
           <input ref={importRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={handleImport}/>
-          <button className="btn btn-outline" onClick={()=>importRef.current?.click()} style={{fontSize:10,padding:"6px 8px",color:"#50c880",borderColor:"#207020"}}>⬆ Import</button>
-          <button className="btn btn-outline" onClick={()=>setShowNewBox(true)} style={{fontSize:10,padding:"6px 8px"}}>➕</button>
+          {(currentUser?.role==="admin"||currentUser?.canAdd)&&(
+            <button className="btn btn-outline" onClick={()=>importRef.current?.click()} style={{fontSize:10,padding:"6px 8px",color:"#50c880",borderColor:"#207020"}}>⬆ Import</button>
+          )}
+          {currentUser?.role==="admin"&&<button className="btn btn-outline" onClick={()=>setShowNewBox(true)} style={{fontSize:10,padding:"6px 8px"}}>➕</button>}
           <button className="btn btn-outline" onClick={()=>setShowChangePin(true)} style={{fontSize:10,padding:"6px 8px"}} title="Change PIN">🔒</button>
           <button className="btn btn-outline" onClick={()=>setShowChangePwd(true)} style={{fontSize:10,padding:"6px 8px"}} title="Change Password">🔑</button>
           <button className="btn btn-amber" onClick={exportXLSX} style={{fontSize:10,padding:"6px 8px"}}>⬇</button>
           {currentUser?.role==="admin"&&<button onClick={()=>setShowUserMgmt(true)} style={{background:"transparent",border:"1px solid #203050",color:"#5090c0",borderRadius:4,padding:"6px 8px",fontSize:10,cursor:"pointer",fontFamily:'"Courier New",monospace',fontWeight:"bold"}} title="Manage Users">👥</button>}
-          {currentUser?.role==="admin"&&<button onClick={()=>{setShowClearData(true);setClearStep(1);setClearConfirmText("");setClearPinDigits([]);setClearPinError(false);}} style={{background:"transparent",border:"1px solid #5a2020",color:"#c05050",borderRadius:4,padding:"6px 8px",fontSize:10,cursor:"pointer",fontFamily:'"Courier New",monospace',fontWeight:"bold"}}>🗑</button>}
+          {currentUser?.role==="admin"&&<button onClick={()=>{setShowClearData(true);setClearStep(1);setClearConfirmText("");setClearPinDigits([]);setClearPinError(false);setSelectedClearBoxes([]);setClearTarget("all");}} style={{background:"transparent",border:"1px solid #5a2020",color:"#c05050",borderRadius:4,padding:"6px 8px",fontSize:10,cursor:"pointer",fontFamily:'"Courier New",monospace',fontWeight:"bold"}}>🗑</button>}
           <button onClick={()=>signOut(auth).then(()=>setCurrentUser(null))} style={{background:"transparent",border:"1px solid #3a3020",color:"#806040",borderRadius:4,padding:"6px 8px",fontSize:10,cursor:"pointer",fontFamily:'"Courier New",monospace',fontWeight:"bold"}} title="Sign Out">⏻</button>
         </div>
       </div>
@@ -1355,7 +1361,7 @@ export default function App(){
           ))}
           <div style={{padding:"14px 14px 6px",fontSize:10,color:"#504030",letterSpacing:2,display:"flex",justifyContent:"space-between",alignItems:"center",paddingRight:8}}>
             <span>BOXES</span>
-            <button className="btn" onClick={()=>setShowNewBox(true)} style={{background:"transparent",border:"1px solid #3a3020",color:"#806040",padding:"2px 6px",fontSize:10,borderRadius:4,cursor:"pointer"}}>+</button>
+            {currentUser?.role==="admin"&&<button className="btn" onClick={()=>setShowNewBox(true)} style={{background:"transparent",border:"1px solid #3a3020",color:"#806040",padding:"2px 6px",fontSize:10,borderRadius:4,cursor:"pointer"}}>+</button>}
           </div>
           {boxes.map(box=>{
             const bs=boxStats[box]||{props:0,keys:0,maxProps:DEFAULT_MAX,pct:0};
@@ -1869,3 +1875,4 @@ export default function App(){
     </div>
   );
 }
+
